@@ -1,0 +1,60 @@
+{
+  "name": "@zakkster/lite-ring-buffer",
+  "version": "1.0.1",
+  "description": "Pre-allocated, zero-GC circular buffer over a Float32Array. Power-of-two capacity, mask-based wrap, oldest-first bulk copy.",
+  "type": "module",
+  "main": "./RingBuffer.js",
+  "module": "./RingBuffer.js",
+  "types": "./RingBuffer.d.ts",
+  "exports": {
+    ".": {
+      "types": "./RingBuffer.d.ts",
+      "node": "./RingBuffer.js",
+      "import": "./RingBuffer.js",
+      "default": "./RingBuffer.js"
+    }
+  },
+  "files": [
+    "RingBuffer.js",
+    "RingBuffer.d.ts",
+    "README.md",
+    "llms.txt",
+    "LICENSE.txt"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "keywords": [
+    "ring-buffer",
+    "circular-buffer",
+    "float32",
+    "zero-gc",
+    "telemetry",
+    "sliding-window",
+    "lite",
+    "no-allocation",
+    "performance"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  },
+  "license": "MIT",
+  "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
+  "homepage": "https://github.com/PeshoVurtoleta/lite-ring-buffer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeshoVurtoleta/lite-ring-buffer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeshoVurtoleta/lite-ring-buffer/issues",
+    "email": "shinikchiev@yahoo.com"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/PeshoVurtoleta"
+  },
+  "sideEffects": false
+}

@@ -1,0 +1,58 @@
+# @zakkster/lite-ring-buffer
+
+> Pre-allocated, zero-GC circular buffer over a Float32Array. Power-of-two capacity, mask-based wrap, oldest-first bulk copy.
+
+## Summary
+
+`@zakkster/lite-ring-buffer` is a zero-dependency ESM micro-library that maintains a sliding window of float32 samples without allocating during steady-state operation. It is designed for telemetry windows (frame times, audio amplitudes, network RTT, mouse velocity) where the naive `Array.push + Array.shift` pattern produces O(n) shifts and per-frame GC pressure.
+
+The buffer is backed by a single `Float32Array` whose length is the next power of two ≥ the requested capacity. Wrap-around uses a bitmask AND (`head & mask`) instead of a modulo. The hot-path `push(value)` performs three indexed stores and one bitwise AND with no allocation.
+
+## Core API
+
+```js
+import { RingBuffer } from '@zakkster/lite-ring-buffer';
+
+const rb = new RingBuffer(1024);            // capacity rounded up to next pow2
+rb.push(42);                                // O(1), zero alloc
+rb.peekNewest();                            // → 42
+rb.peekOldest();                            // → 42 (only one sample)
+rb.count;                                   // → 1
+rb.capacity;                                // → 1024
+rb.isFull();                                // → false
+
+const out = new Float32Array(rb.count);
+rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
+```
+
+## Concepts
+
+- **Capacity** is rounded up to the next power of two so wrap-around can use a bitmask. The original request is preserved on `.requestedCapacity`.
+- **`get(offset)`** uses 0 for newest, `count-1` for oldest. Returns `undefined` if out of range.
+- **`copyTo(dst, dstOffset)`** writes oldest-first using at most two `TypedArray.set` calls (one per ring half), each backed by a memcpy in V8.
+- **`tryPush(value, options)`** mirrors `push` but returns `false` when the buffer is full and `options.overwrite === false`. The options argument is read by property access — no destructuring default — so `tryPush(v)` does not allocate.
+- **`reset()`** clears the buffer and fills the backing storage with zeros to prevent stale reads from `copyTo` on a smaller subsequent count.
+- **`destroy()`** nulls the backing typed array so the GC can reclaim it in long-lived applications.
+
+## Constraints
+
+- ESM only.
+- Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision.
+- NaN and ±Infinity are stored and read back unchanged. Downstream consumers must filter NaN where it matters (e.g. min/max).
+- After `destroy()` the instance is unusable.
+- Not thread-safe. For cross-Worker streaming, the consumer must implement the head/mask discipline against a `SharedArrayBuffer`.
+
+## Performance
+
+- `push` and `peek*` are O(1) with zero allocation.
+- `copyTo` is O(n) memcpy.
+- 1M `push` calls into a 4096-slot buffer produce sub-MB heap growth (verified by the test suite under `--expose-gc`).
+
+## Companion libraries
+
+- `@zakkster/lite-stats-math` — single-pass avg/min/max/quantile over a `RingBuffer`.
+- `@zakkster/lite-canvas-graph` — zero-GC `<canvas>` waveform renderer that consumes a `RingBuffer` directly.
+
+## License
+
+MIT
