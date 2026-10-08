@@ -1,5 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RingBuffer } from './RingBuffer.js';
+import { RingBuffer, ceilPow2, MAX_CAPACITY } from './RingBuffer.js';
+
+describe('ceilPow2', () => {
+    it('returns the smallest power of two >= n', () => {
+        const cases = [[1, 1], [2, 2], [3, 4], [4, 4], [5, 8], [100, 128], [1024, 1024], [1025, 2048]];
+        for (const [n, want] of cases) expect(ceilPow2(n)).toBe(want);
+    });
+
+    it('is exact at the 32-bit edges', () => {
+        expect(ceilPow2(2 ** 30 + 1)).toBe(2 ** 31);
+        expect(ceilPow2(2 ** 31 - 1)).toBe(2 ** 31);
+        expect(ceilPow2(2 ** 31)).toBe(2 ** 31);
+        expect(ceilPow2(2 ** 31 + 1)).toBe(2 ** 32);
+        expect(ceilPow2(2 ** 32)).toBe(2 ** 32);
+    });
+});
 
 describe('RingBuffer — construction & validation', () => {
     it('rounds capacity up to next power of two', () => {
@@ -34,6 +49,19 @@ describe('RingBuffer — construction & validation', () => {
         expect(() => new RingBuffer(-1)).toThrow(RangeError);
         expect(() => new RingBuffer(NaN)).toThrow(RangeError);
         expect(() => new RingBuffer(Infinity)).toThrow(RangeError);
+        expect(() => new RingBuffer('8')).toThrow(RangeError);
+    });
+
+    it('rejects capacities above 2^31 instead of silently shrinking them', () => {
+        // Previously 2**32 became capacity 1, and anything above 2^31 capacity 0.
+        expect(MAX_CAPACITY).toBe(2 ** 31);
+        expect(() => new RingBuffer(2 ** 31 + 1)).toThrow(RangeError);
+        expect(() => new RingBuffer(2 ** 32)).toThrow(RangeError);
+        expect(() => new RingBuffer(3e9)).toThrow(RangeError);
+    });
+
+    it('throws a RangeError (not a TypeError) for a Symbol', () => {
+        expect(() => new RingBuffer(Symbol('x'))).toThrow(RangeError);
     });
 
     it('mask = capacity - 1', () => {
@@ -116,6 +144,13 @@ describe('RingBuffer — tryPush', () => {
         for (let i = 0; i < 1000; i++) rb.tryPush(i);
         expect(rb.count).toBe(64);
     });
+
+    it('treats null options like no options', () => {
+        const rb = new RingBuffer(1);
+        rb.push(1);
+        expect(rb.tryPush(2, null)).toBe(true);
+        expect(rb.peekNewest()).toBe(2);
+    });
 });
 
 describe('RingBuffer — get / getOrDefault', () => {
@@ -137,6 +172,20 @@ describe('RingBuffer — get / getOrDefault', () => {
         expect(rb.get(-1)).toBeUndefined();
         expect(rb.get(3)).toBeUndefined();
         expect(rb.get(100)).toBeUndefined();
+    });
+
+    it('returns undefined for non-integer offsets', () => {
+        // Previously NaN / undefined / 0.5 / '1' all read some live slot.
+        expect(rb.get(NaN)).toBeUndefined();
+        expect(rb.get()).toBeUndefined();
+        expect(rb.get(0.5)).toBeUndefined();
+        expect(rb.get('1')).toBeUndefined();
+        expect(rb.get(Symbol('x'))).toBeUndefined();
+        expect(rb.getOrDefault(NaN, -1)).toBe(-1);
+    });
+
+    it('getOrDefault without a default returns undefined when out of range', () => {
+        expect(rb.getOrDefault(3)).toBeUndefined();
     });
 
     it('getOrDefault returns default for out-of-range', () => {
@@ -188,6 +237,57 @@ describe('RingBuffer — copyTo', () => {
         const out = new Float32Array([99, 99, 99, 99]);
         expect(rb.copyTo(out, 0)).toBe(0);
         expect(Array.from(out)).toEqual([99, 99, 99, 99]);
+    });
+
+    it('throws on a too-small destination without a partial write', () => {
+        const rb = new RingBuffer(4);
+        for (let i = 1; i <= 6; i++) rb.push(i); // wrapped: two-segment copy
+        const out = new Float32Array([9, 9, 9]);
+        expect(() => rb.copyTo(out, 0)).toThrow(RangeError);
+        expect(Array.from(out)).toEqual([9, 9, 9]);
+        expect(() => rb.copyTo(new Float32Array(8), 5)).toThrow(RangeError);
+    });
+
+    it('rejects negative or non-integer offsets', () => {
+        const rb = new RingBuffer(4);
+        rb.push(1);
+        expect(() => rb.copyTo(new Float32Array(4), -1)).toThrow(RangeError);
+        expect(() => rb.copyTo(new Float32Array(4), 0.5)).toThrow(RangeError);
+    });
+
+    it('copies into a Float64Array', () => {
+        const rb = new RingBuffer(4);
+        for (let i = 1; i <= 6; i++) rb.push(i);
+        const out = new Float64Array(4);
+        rb.copyTo(out);
+        expect(Array.from(out)).toEqual([3, 4, 5, 6]);
+    });
+});
+
+describe('RingBuffer — iteration', () => {
+    it('forEach visits oldest-first with index', () => {
+        const rb = new RingBuffer(4);
+        for (let i = 1; i <= 6; i++) rb.push(i);
+        const seen = [];
+        rb.forEach((v, i, self) => { seen.push([v, i]); expect(self).toBe(rb); });
+        expect(seen).toEqual([[3, 0], [4, 1], [5, 2], [6, 3]]);
+    });
+
+    it('is iterable oldest-first and matches copyTo', () => {
+        const rb = new RingBuffer(8);
+        for (let i = 1; i <= 11; i++) rb.push(i);
+        const out = new Float32Array(rb.count);
+        rb.copyTo(out);
+        expect([...rb]).toEqual(Array.from(out));
+        expect([...rb]).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+    });
+
+    it('yields nothing when empty', () => {
+        const rb = new RingBuffer(4);
+        expect([...rb]).toEqual([]);
+        let calls = 0;
+        rb.forEach(() => calls++);
+        expect(calls).toBe(0);
     });
 });
 

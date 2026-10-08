@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-ring-buffer",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Pre-allocated, zero-GC circular buffer over a Float32Array. Power-of-two capacity, mask-based wrap, oldest-first bulk copy.",
   "type": "module",
   "main": "./RingBuffer.js",

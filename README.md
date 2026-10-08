@@ -1,6 +1,8 @@
 # @zakkster/lite-ring-buffer
 
 [![npm version](https://img.shields.io/npm/v/@zakkster/lite-ring-buffer.svg?style=for-the-badge&color=latest)](https://www.npmjs.com/package/@zakkster/lite-ring-buffer)
+[![sponsor](https://img.shields.io/badge/sponsor-PeshoVurtoleta-ea4aaa.svg?logo=github)](https://github.com/sponsors/PeshoVurtoleta)
+![Zero-GC](https://img.shields.io/badge/Zero--GC-Engine-00C853?style=for-the-badge&logo=leaf&logoColor=white)
 [![npm bundle size](https://img.shields.io/bundlephobia/minzip/@zakkster/lite-ring-buffer?style=for-the-badge)](https://bundlephobia.com/result?p=@zakkster/lite-ring-buffer)
 [![npm downloads](https://img.shields.io/npm/dm/@zakkster/lite-ring-buffer?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-ring-buffer)
 [![npm total downloads](https://img.shields.io/npm/dt/@zakkster/lite-ring-buffer?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-ring-buffer)
@@ -10,7 +12,7 @@
 
 **Pre-allocated, zero-GC circular buffer over a `Float32Array`. Power-of-two capacity. Mask-based wrap. Oldest-first bulk copy.**
 
-One allocation for the lifetime of the buffer. No `Array.shift`, no slicing, no per-frame `new Float32Array`. The `push` hot path is three indexed stores and a bitwise AND.
+One allocation for the lifetime of the buffer. No `Array.shift`, no slicing, no per-frame `new Float32Array`. The `push` hot path is one indexed store, a masked increment and a compare.
 
 ```js
 import { RingBuffer } from '@zakkster/lite-ring-buffer';
@@ -76,7 +78,7 @@ flowchart LR
     end
     subgraph R["RingBuffer (this library)"]
         direction TB
-        R1["push: 3 stores + 1 AND<br/>zero alloc"]
+        R1["push: 1 store + 1 AND<br/>zero alloc"]
         R2["wrap: head & mask<br/>O(1)"]
         R3["copyTo: 1–2 memcpys<br/>contiguous oldest-first"]
         R1 --> R2 --> R3
@@ -99,7 +101,7 @@ ESM-only. No dependencies. Ships TypeScript definitions alongside the source.
 import { RingBuffer } from '@zakkster/lite-ring-buffer';
 ```
 
-You can also drop `src/index.js` into your project directly — it's one file, ~120 lines.
+You can also drop `RingBuffer.js` into your project directly — it's one file with no imports.
 
 ---
 
@@ -222,7 +224,7 @@ flowchart TB
 |---|---|---|
 | `requestedCapacity` | `number` | Minimum capacity. Rounded up to the next power of two. |
 
-Throws `RangeError` if `requestedCapacity` is not a finite positive number.
+Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 is the ceiling because the wrap mask must fit in an int32.
 
 ### Instance members
 
@@ -247,21 +249,30 @@ Throws `RangeError` if `requestedCapacity` is not a finite positive number.
 | `peekOldest()` | `number` | Convenience for `getOrDefault(count - 1, 0)`. |
 | `isFull()` | `boolean` | `count === capacity`. |
 | `isEmpty()` | `boolean` | `count === 0`. |
-| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into `dst`. Returns `count`. |
+| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into a `Float32Array` or `Float64Array`. Returns `count`. Throws `RangeError` (writing nothing) if `dst` is too small. |
+| `forEach(fn)` | `void` | Call `fn(value, index, rb)` for each sample, oldest-first. Zero allocation with a hoisted callback. |
+| `[Symbol.iterator]()` | `Iterator<number>` | `for (const v of rb)` / `[...rb]`, oldest-first. |
 | `reset()` | `void` | Clear the buffer and zero the backing storage. |
 | `destroy()` | `void` | Drop all references. Subsequent calls are undefined behavior. |
+
+### Helpers
+
+| Export | Description |
+|---|---|
+| `ceilPow2(n)` | Smallest power of two `>= n` for an integer `n` in `[1, 2^32]`. `ceilPow2(1) === 1`. |
+| `MAX_CAPACITY` | `2^31`, the largest accepted capacity. |
 
 ---
 
 ## Edge cases & guarantees
 
 - **Capacity is always rounded up.** `new RingBuffer(100).capacity === 128`. The original is preserved on `requestedCapacity` so you can size sibling structures (e.g. a stats scratchpad) to either value as needed.
-- **`get(0)` is the newest.** Negative or out-of-range offsets return `undefined` (`get`) or the default (`getOrDefault`). They never throw.
+- **`get(0)` is the newest.** Any offset that is not an integer in `[0, count)` (negative, out of range, `NaN`, fractional, non-number) returns `undefined` (`get`) or the default (`getOrDefault`). They never throw.
 - **NaN and ±Infinity round-trip.** They store and read back unchanged. Downstream stats consumers must filter NaN themselves; `@zakkster/lite-stats-math` does this for you.
 - **`tryPush` does not allocate when called without options.** The implementation reads the option object by property access (no destructuring default), so `tryPush(v)` is hot-path-safe just like `push(v)`.
-- **`reset()` zeroes the backing memory.** This is intentional — without it, a fresh `copyTo` on a partially-filled buffer would surface stale samples. The cost is one `Float32Array.fill(0)`, which is a single memset in V8.
+- **`reset()` zeroes the backing memory.** The library's own reads are bounded by `count` and never see old slots; zeroing protects consumers that read `data` directly. The cost is one `Float32Array.fill(0)` (O(capacity)), which is a single memset in V8.
 - **`destroy()` is final.** It nulls the typed array reference so the GC can reclaim the backing buffer in long-lived applications. After `destroy()`, the instance is unusable.
-- **Hot-path zero-allocation.** `push`, `tryPush(v)`, `get`, `peekNewest`, `peekOldest`, `isFull`, `isEmpty` and `copyTo` allocate nothing on a steady-state call. The test suite includes a 1M-push smoke test that verifies sub-MB heap growth under `--expose-gc`.
+- **Hot-path zero-allocation.** `push`, `tryPush(v)`, `get`, `peekNewest`, `peekOldest`, `isFull`, `isEmpty` and `forEach` (with a hoisted callback) allocate nothing on a steady-state call. `copyTo` copies no sample data twice, but creates up to two small `subarray` views per call; iteration allocates an iterator. The test suite includes a 1M-push smoke test that verifies sub-MB heap growth under `--expose-gc`.
 
 ---
 

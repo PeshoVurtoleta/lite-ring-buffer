@@ -6,7 +6,7 @@
 
 `@zakkster/lite-ring-buffer` is a zero-dependency ESM micro-library that maintains a sliding window of float32 samples without allocating during steady-state operation. It is designed for telemetry windows (frame times, audio amplitudes, network RTT, mouse velocity) where the naive `Array.push + Array.shift` pattern produces O(n) shifts and per-frame GC pressure.
 
-The buffer is backed by a single `Float32Array` whose length is the next power of two ≥ the requested capacity. Wrap-around uses a bitmask AND (`head & mask`) instead of a modulo. The hot-path `push(value)` performs three indexed stores and one bitwise AND with no allocation.
+The buffer is backed by a single `Float32Array` whose length is the next power of two ≥ the requested capacity. Wrap-around uses a bitmask AND (`head & mask`) instead of a modulo. The hot-path `push(value)` performs one indexed store, a masked increment and a compare, with no allocation.
 
 ## Core API
 
@@ -31,7 +31,9 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 - **`get(offset)`** uses 0 for newest, `count-1` for oldest. Returns `undefined` if out of range.
 - **`copyTo(dst, dstOffset)`** writes oldest-first using at most two `TypedArray.set` calls (one per ring half), each backed by a memcpy in V8.
 - **`tryPush(value, options)`** mirrors `push` but returns `false` when the buffer is full and `options.overwrite === false`. The options argument is read by property access — no destructuring default — so `tryPush(v)` does not allocate.
-- **`reset()`** clears the buffer and fills the backing storage with zeros to prevent stale reads from `copyTo` on a smaller subsequent count.
+- **`reset()`** clears the buffer and fills the backing storage with zeros so consumers that read `data` directly never see old samples.
+- **`forEach(fn)` / `[Symbol.iterator]`** visit samples oldest-first, matching `copyTo`.
+- **`ceilPow2(n)`** and **`MAX_CAPACITY`** (2^31) are exported helpers. Capacities above 2^31 throw `RangeError`.
 - **`destroy()`** nulls the backing typed array so the GC can reclaim it in long-lived applications.
 
 ## Constraints

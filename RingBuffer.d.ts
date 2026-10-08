@@ -1,3 +1,12 @@
+/** Largest capacity the int32 wrap math can honor: 2^31 slots. */
+export declare const MAX_CAPACITY: number;
+
+/**
+ * Smallest power of two >= n, for an integer n in [1, 2^32].
+ * `ceilPow2(1) === 1`.
+ */
+export declare function ceilPow2(n: number): number;
+
 /**
  * Options for {@link RingBuffer.tryPush}.
  */
@@ -13,22 +22,31 @@ export interface TryPushOptions {
  * Zero-allocation circular buffer over a Float32Array.
  *
  * Capacity is rounded UP to the next power of two so wrap-around uses a
- * single bitwise AND instead of a modulo. `copyTo` writes oldest-first;
- * `get(0)` returns the newest sample.
+ * single bitwise AND instead of a modulo. `copyTo`, `forEach` and iteration
+ * are oldest-first; `get(0)` returns the newest sample.
  */
-export class RingBuffer {
-    /** Capacity the caller asked for, before pow2 rounding. */
+export class RingBuffer implements Iterable<number> {
+    /** Capacity the caller asked for (floored), before pow2 rounding. */
     readonly requestedCapacity: number;
 
     /** Actual storage size — always a power of two. */
     readonly capacity: number;
 
+    /** `capacity - 1`. Used in the wrap math. */
+    readonly mask: number;
+
+    /** Backing storage. Set to `null` by `destroy()`. */
+    readonly data: Float32Array;
+
+    /** Write cursor; the next push lands at `data[head]`. Exposed for direct readers. */
+    head: number;
+
     /** Live samples, 0..capacity. */
     count: number;
 
     /**
-     * @param requestedCapacity minimum capacity; rounded up to next power of two. Defaults to 1024.
-     * @throws RangeError if requestedCapacity is not a finite positive number.
+     * @param requestedCapacity minimum capacity in [1, 2^31]; rounded up to next power of two. Defaults to 1024.
+     * @throws RangeError if requestedCapacity is not a number in [1, 2^31].
      */
     constructor(requestedCapacity?: number);
 
@@ -50,14 +68,15 @@ export class RingBuffer {
 
     /**
      * Sample at offset (0 = newest, count-1 = oldest).
-     * @returns the sample, or `undefined` if out of range.
+     * @returns the sample, or `undefined` if `offset` is not an in-range integer.
      */
     get(offset: number): number | undefined;
 
     /**
      * Sample at offset, or `defaultValue` if out of range.
      */
-    getOrDefault(offset: number, defaultValue?: number): number;
+    getOrDefault(offset: number): number | undefined;
+    getOrDefault<D>(offset: number, defaultValue: D): number | D;
 
     /** Newest sample, or 0 when empty. */
     peekNewest(): number;
@@ -73,12 +92,19 @@ export class RingBuffer {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
-     * Caller must ensure `dst.length >= dstOffset + this.count`.
      * @returns number of samples written (== this.count).
+     * @throws RangeError if `dstOffset` is not a non-negative integer or
+     *         `dst.length < dstOffset + this.count` (nothing is written).
      */
-    copyTo(dstFloat32Array: Float32Array, dstOffset?: number): number;
+    copyTo(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
-    /** Logical reset. Also zeroes underlying storage to prevent stale reads. */
+    /** Visit live samples oldest -> newest. Zero allocation with a hoisted callback. */
+    forEach(fn: (value: number, index: number, rb: RingBuffer) => void): void;
+
+    /** Iterate live samples oldest -> newest. */
+    [Symbol.iterator](): IterableIterator<number>;
+
+    /** Logical reset. Also zeroes underlying storage (O(capacity)). */
     reset(): void;
 
     /**
