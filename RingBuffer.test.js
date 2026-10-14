@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import vm from 'node:vm';
 import { RingBuffer, ceilPow2, MAX_CAPACITY } from './RingBuffer.js';
 
 describe('ceilPow2', () => {
@@ -13,6 +14,17 @@ describe('ceilPow2', () => {
         expect(ceilPow2(2 ** 31)).toBe(2 ** 31);
         expect(ceilPow2(2 ** 31 + 1)).toBe(2 ** 32);
         expect(ceilPow2(2 ** 32)).toBe(2 ** 32);
+    });
+
+    it('behaves as documented outside [1, 2^32] (inputs are not validated)', () => {
+        const cases = [
+            [1.5, 1], [2.5, 2],                  // fraction above 1: as Math.floor(n)
+            [0.5, 1], [0.999, 1],                // 0 < n < 1: 1
+            [0, 2 ** 32], [-0.5, 2 ** 32], [-5, 2 ** 32], // finite n <= 0: 2^32
+            [NaN, 1], [Infinity, 1], [-Infinity, 1],
+            [2 ** 32 + 1, 1], [2 ** 32 + 2, 2], [2 ** 33, 2 ** 32], // wraps mod 2^32
+        ];
+        for (const [n, want] of cases) expect(ceilPow2(n)).toBe(want);
     });
 });
 
@@ -194,6 +206,19 @@ describe('RingBuffer — get / getOrDefault', () => {
         expect(rb.getOrDefault(0, -999)).toBe(30);
     });
 
+    it('getOrDefault agrees with get for every in-range offset, including after wrap', () => {
+        // getOrDefault no longer delegates to get; pin that the two stay in sync.
+        const wrap = new RingBuffer(8);
+        for (let i = 1; i <= 13; i++) wrap.push(i + 0.25);
+        for (let k = -2; k < 11; k++) {
+            const want = wrap.get(k);
+            expect(wrap.getOrDefault(k, -1)).toBe(want === undefined ? -1 : want);
+        }
+        for (const bad of [NaN, 0.5, '1', undefined, Symbol('x')]) {
+            expect(wrap.getOrDefault(bad, -1)).toBe(-1);
+        }
+    });
+
     it('addresses correctly after wrap', () => {
         const wrap = new RingBuffer(4);
         for (let i = 1; i <= 6; i++) wrap.push(i); // overwrites 1, 2
@@ -262,6 +287,91 @@ describe('RingBuffer — copyTo', () => {
         rb.copyTo(out);
         expect(Array.from(out)).toEqual([3, 4, 5, 6]);
     });
+
+    it('rejects a dst with no length instead of silently returning', () => {
+        // Previously `n > undefined` was false: an empty buffer returned 0 for
+        // copyTo({}), a non-empty one threw "dst.set is not a function".
+        const empty = new RingBuffer(4);
+        expect(() => empty.copyTo({})).toThrow(TypeError);
+        expect(() => empty.copyTo({ set() {} })).toThrow(TypeError);
+        const rb = new RingBuffer(4);
+        rb.push(1);
+        expect(() => rb.copyTo({})).toThrow(TypeError);
+        expect(() => rb.copyTo({ set() {}, length: 4 })).toThrow(TypeError);
+    });
+
+    it('rejects a non-TypedArray dst with a TypeError', () => {
+        const rb = new RingBuffer(4);
+        rb.push(1);
+        expect(() => rb.copyTo(null)).toThrow(TypeError);
+        expect(() => rb.copyTo(undefined)).toThrow(TypeError);
+        expect(() => rb.copyTo([0, 0, 0, 0])).toThrow(TypeError);
+        expect(() => rb.copyTo(42)).toThrow(TypeError);
+        expect(() => rb.copyTo(new Map())).toThrow(TypeError);
+        expect(() => rb.copyTo(new DataView(new ArrayBuffer(16)))).toThrow(TypeError);
+        expect(() => rb.copyTo(vm.runInNewContext('new DataView(new ArrayBuffer(64))'))).toThrow(TypeError);
+        expect(() => rb.copyTo(Object.create(null))).toThrow('copyTo needs a TypedArray dst (got object)');
+    });
+
+    it('bounds-checks against the real length, not an overridden getter', () => {
+        // The scalar loop would drop stores past the real end without an error.
+        class Liar extends Float32Array { get length() { return 100; } }
+        const rb = new RingBuffer(8);
+        for (let i = 1; i <= 5; i++) rb.push(i);
+        const dst = new Liar(2);
+        expect(() => rb.copyTo(dst)).toThrow(RangeError);
+        expect(Array.from(new Float32Array(dst.buffer))).toEqual([0, 0]);
+    });
+
+    it('accepts other TypedArray kinds', () => {
+        const rb = new RingBuffer(4);
+        for (let i = 1; i <= 6; i++) rb.push(i);
+        const i32 = new Int32Array(4);
+        expect(rb.copyTo(i32)).toBe(4);
+        expect(Array.from(i32)).toEqual([3, 4, 5, 6]);
+    });
+
+    // Up to 32 samples go through the scalar loop, more through set + subarray.
+    // A wrapped ring is always full (wrapping needs more pushes than slots), so
+    // wrapped copies are whole powers of two: 32 is the loop's largest, 64 the
+    // set path's smallest. The oracle is the pushed sequence itself, not get().
+    const cases = [
+        // [capacity, pushes, wrapped, path]
+        [32, 1, false, 'loop'],
+        [32, 31, false, 'loop'],
+        [32, 32, false, 'loop'],
+        [8, 13, true, 'loop'],
+        [32, 49, true, 'loop'],
+        [64, 33, false, 'set'],
+        [64, 64, false, 'set'],
+        [64, 97, true, 'set'],
+        [128, 100, false, 'set'],
+        [128, 200, true, 'set'],
+    ];
+    for (const [cap, pushes, wrapped, path] of cases) {
+        const n = Math.min(cap, pushes);
+        it(`copies ${n} samples ${wrapped ? 'across the wrap' : 'contiguously'} (${path} path, Float32 + Float64)`, () => {
+            const rb = new RingBuffer(cap);
+            const seq = [];
+            for (let i = 1; i <= pushes; i++) { rb.push(i + 0.25); seq.push(i + 0.25); }
+            const want = seq.slice(seq.length - n);
+            expect(rb.count).toBe(n);
+            expect(((rb.head - rb.count) & rb.mask) + rb.count > rb.capacity).toBe(wrapped);
+            expect(n <= 32).toBe(path === 'loop');
+
+            const f32 = new Float32Array(n + 3).fill(-1);
+            expect(rb.copyTo(f32, 2)).toBe(n);
+            expect(Array.from(f32.subarray(2, 2 + n))).toEqual(want);
+            expect([f32[0], f32[1], f32[f32.length - 1]]).toEqual([-1, -1, -1]);
+
+            const f64 = new Float64Array(n);
+            expect(rb.copyTo(f64)).toBe(n);
+            expect(Array.from(f64)).toEqual(want);
+        });
+    }
+    // No-allocation is gated by test/alloc.mjs (npm run alloc). A heapUsed delta
+    // here cannot see it: scavenges absorb the views, and the old set path read
+    // 0.96 MB over 100k copies, under a 1 MB bound.
 });
 
 describe('RingBuffer — iteration', () => {
@@ -311,14 +421,26 @@ describe('RingBuffer — reset & destroy', () => {
         expect(rb.capacity).toBe(4);
     });
 
-    it('destroy nulls the backing storage', () => {
+    it('destroy releases the backing storage', () => {
         const rb = new RingBuffer(4);
+        const before = rb.data;
         rb.push(1);
         rb.destroy();
-        expect(rb.data).toBeNull();
+        expect(rb.data).not.toBe(before);
         expect(rb.capacity).toBe(0);
         expect(rb.count).toBe(0);
         expect(rb.mask).toBe(0);
+    });
+
+    it('destroy leaves an empty Float32Array, not null', () => {
+        // Keeps the `data` field typed Float32Array on the shared hidden class.
+        const a = new RingBuffer(4);
+        const b = new RingBuffer(8);
+        a.destroy();
+        b.destroy();
+        expect(a.data).toBeInstanceOf(Float32Array);
+        expect(a.data.length).toBe(0);
+        expect(b.data).toBe(a.data); // one shared empty array, no per-destroy allocation
     });
 });
 

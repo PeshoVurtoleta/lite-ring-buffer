@@ -19,10 +19,13 @@
     "RingBuffer.d.ts",
     "README.md",
     "llms.txt",
+    "CHANGELOG.md",
     "LICENSE.txt"
   ],
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "alloc": "node --expose-gc test/alloc.mjs",
+    "verify": "npm test && npm run alloc"
   },
   "keywords": [
     "ring-buffer",

@@ -28,13 +28,13 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 ## Concepts
 
 - **Capacity** is rounded up to the next power of two so wrap-around can use a bitmask. The original request is preserved on `.requestedCapacity`.
-- **`get(offset)`** uses 0 for newest, `count-1` for oldest. Returns `undefined` if out of range.
-- **`copyTo(dst, dstOffset)`** writes oldest-first using at most two `TypedArray.set` calls (one per ring half), each backed by a memcpy in V8.
+- **`get(offset)`** uses 0 for newest, `count-1` for oldest. Returns `undefined` if out of range. Its `number | undefined` result boxes a non-integer sample (16 B per call); in a hot loop use **`getOrDefault(offset, 0)`**, which allocates nothing.
+- **`copyTo(dst, dstOffset)`** writes oldest-first. Up to 32 samples use an allocation-free scalar loop; larger copies use at most two `TypedArray.set` calls (one per ring half), each backed by a memcpy in V8. A `dst` that is not a TypedArray (an Array, a DataView, a plain object) throws `TypeError`; a too-small one throws `RangeError`. Nothing is written in either case.
 - **`tryPush(value, options)`** mirrors `push` but returns `false` when the buffer is full and `options.overwrite === false`. The options argument is read by property access — no destructuring default — so `tryPush(v)` does not allocate.
 - **`reset()`** clears the buffer and fills the backing storage with zeros so consumers that read `data` directly never see old samples.
 - **`forEach(fn)` / `[Symbol.iterator]`** visit samples oldest-first, matching `copyTo`.
 - **`ceilPow2(n)`** and **`MAX_CAPACITY`** (2^31) are exported helpers. Capacities above 2^31 throw `RangeError`.
-- **`destroy()`** nulls the backing typed array so the GC can reclaim it in long-lived applications.
+- **`destroy()`** swaps the backing typed array for a shared empty `Float32Array` (not `null`) so the GC can reclaim it in long-lived applications. Calls after `destroy()` are undefined behavior; `push`, `tryPush` and `reset` no longer throw, they do nothing.
 
 ## Constraints
 
@@ -46,8 +46,8 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 
 ## Performance
 
-- `push` and `peek*` are O(1) with zero allocation.
-- `copyTo` is O(n) memcpy.
+- `push`, `tryPush(v)`, `getOrDefault(i, 0)` and `peek*` are O(1) and allocate 0 B per call in a hot loop where V8 inlines them (`npm run alloc`, Node 26.8.2). `get(i)` allocates 16 B per call on non-integer samples.
+- `copyTo` is O(n). Up to 32 samples it allocates nothing; above that it is a memcpy plus one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped).
 - 1M `push` calls into a 4096-slot buffer produce sub-MB heap growth (verified by the test suite under `--expose-gc`).
 
 ## Companion libraries

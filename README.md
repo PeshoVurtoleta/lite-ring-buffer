@@ -80,7 +80,7 @@ flowchart LR
         direction TB
         R1["push: 1 store + 1 AND<br/>zero alloc"]
         R2["wrap: head & mask<br/>O(1)"]
-        R3["copyTo: 1–2 memcpys<br/>contiguous oldest-first"]
+        R3["copyTo: loop (<= 32) or 1-2 memcpys<br/>contiguous oldest-first"]
         R1 --> R2 --> R3
     end
 ```
@@ -194,7 +194,7 @@ Once the buffer is full (`count === capacity`), `head` chases the oldest sample 
 
 ### Oldest-first bulk copy
 
-`copyTo(dst, dstOffset)` writes oldest-first using at most two `TypedArray.set` calls:
+`copyTo(dst, dstOffset)` writes oldest-first. Up to 32 samples it runs a scalar loop, which allocates nothing; above that it uses at most two `TypedArray.set` calls, one per ring half:
 
 ```mermaid
 flowchart TB
@@ -212,7 +212,7 @@ flowchart TB
     classDef newest fill:#288,color:#fff
 ```
 
-`TypedArray.set` from a `subarray` is backed by a memcpy in V8 — there's no per-element loop in JS land.
+`TypedArray.set` from a `subarray` is backed by a memcpy in V8, with no per-element loop in JS land. Each `subarray` view costs 104 B (Node 26.8.2), so the set path allocates 104 B per call contiguous and 208 B wrapped. The scalar loop below 33 samples avoids that; the cutoff of 32 is nominal and its speed relative to memcpy is not yet measured.
 
 ---
 
@@ -235,7 +235,7 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `count` | `number` | Live samples, `0..capacity`. |
 | `head` | `number` | Write cursor. Internal — exposed for inspection only. |
 | `mask` | `number` | `capacity - 1`. Used in the wrap math. |
-| `data` | `Float32Array` | Backing storage. Set to `null` after `destroy()`. |
+| `data` | `Float32Array` | Backing storage. A shared empty `Float32Array` after `destroy()`. |
 
 ### Methods
 
@@ -244,22 +244,22 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `push(value)` | `void` | Append a sample. Overwrites the oldest when full. **Hot-path safe.** |
 | `tryPush(value, options?)` | `boolean` | Like `push`, but returns `false` when full and `options.overwrite === false`. |
 | `get(offset)` | `number \| undefined` | Sample at offset (0 = newest). `undefined` if out of range. |
-| `getOrDefault(offset, default?)` | `number` | Same, with a default for out-of-range. |
+| `getOrDefault(offset, default?)` | `number \| D` | Same, with a default for out-of-range (`undefined` when omitted). With a numeric default it allocates nothing in a hot loop; prefer it to `get`. |
 | `peekNewest()` | `number` | Convenience for `getOrDefault(0, 0)`. |
 | `peekOldest()` | `number` | Convenience for `getOrDefault(count - 1, 0)`. |
 | `isFull()` | `boolean` | `count === capacity`. |
 | `isEmpty()` | `boolean` | `count === 0`. |
-| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into a `Float32Array` or `Float64Array`. Returns `count`. Throws `RangeError` (writing nothing) if `dst` is too small. |
+| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into a `Float32Array` or `Float64Array`. Returns `count`. Throws `TypeError` if `dst` is not a TypedArray (or is a `BigInt64Array` and the buffer is not empty) and `RangeError` if it is too small, writing nothing in either case. |
 | `forEach(fn)` | `void` | Call `fn(value, index, rb)` for each sample, oldest-first. Zero allocation with a hoisted callback. |
 | `[Symbol.iterator]()` | `Iterator<number>` | `for (const v of rb)` / `[...rb]`, oldest-first. |
 | `reset()` | `void` | Clear the buffer and zero the backing storage. |
-| `destroy()` | `void` | Drop all references. Subsequent calls are undefined behavior. |
+| `destroy()` | `void` | Release the backing storage; `data` becomes a shared empty `Float32Array`. Subsequent calls are undefined behavior: `push`, `tryPush` and `reset` no longer throw, they do nothing. |
 
 ### Helpers
 
 | Export | Description |
 |---|---|
-| `ceilPow2(n)` | Smallest power of two `>= n` for an integer `n` in `[1, 2^32]`. `ceilPow2(1) === 1`. |
+| `ceilPow2(n)` | Smallest power of two `>= n` for an integer `n` in `[1, 2^32]`. `ceilPow2(1) === 1`. Not validated: a fraction above 1 behaves as `Math.floor(n)` (`ceilPow2(1.5) === 1`); `0 < n < 1`, `NaN` and `+/-Infinity` give `1`; a finite `n <= 0` gives `2^32`; `n > 2^32` wraps mod `2^32`. |
 | `MAX_CAPACITY` | `2^31`, the largest accepted capacity. |
 
 ---
@@ -271,8 +271,8 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 - **NaN and ±Infinity round-trip.** They store and read back unchanged. Downstream stats consumers must filter NaN themselves; `@zakkster/lite-stats-math` does this for you.
 - **`tryPush` does not allocate when called without options.** The implementation reads the option object by property access (no destructuring default), so `tryPush(v)` is hot-path-safe just like `push(v)`.
 - **`reset()` zeroes the backing memory.** The library's own reads are bounded by `count` and never see old slots; zeroing protects consumers that read `data` directly. The cost is one `Float32Array.fill(0)` (O(capacity)), which is a single memset in V8.
-- **`destroy()` is final.** It nulls the typed array reference so the GC can reclaim the backing buffer in long-lived applications. After `destroy()`, the instance is unusable.
-- **Hot-path zero-allocation.** `push`, `tryPush(v)`, `get`, `peekNewest`, `peekOldest`, `isFull`, `isEmpty` and `forEach` (with a hoisted callback) allocate nothing on a steady-state call. `copyTo` copies no sample data twice, but creates up to two small `subarray` views per call; iteration allocates an iterator. The test suite includes a 1M-push smoke test that verifies sub-MB heap growth under `--expose-gc`.
+- **`destroy()` is final.** It swaps `data` for a shared empty `Float32Array` so the GC can reclaim the backing buffer in long-lived applications. It does not assign `null`: that would widen the `data` field's tracked type in V8 from `Float32Array` to any value for every live instance (seen with `--trace-generalization`, Node 26.8.2). The trade-off: `push`, `tryPush` and `reset` after `destroy()` used to throw a `TypeError` on `null`; now they do nothing, and `tryPush(v)` returns `true` without storing. Reads were already empty. After `destroy()`, the instance is unusable, and nothing tells you so.
+- **Hot-path zero-allocation.** Measured by `npm run alloc` (`test/alloc.mjs`, V8's allocated-bytes counter, 1M calls per window, Node 26.8.2 arm64) in a monomorphic hot loop, with non-integer samples: `push`, `tryPush(v)`, `getOrDefault(i, n)` with a numeric default, `peekNewest`, `peekOldest`, `isFull`, `isEmpty`, `forEach` (with a hoisted callback) and `copyTo` of up to 32 samples allocate 0 B per call. `get(i)` allocates 16 B per call: its `number | undefined` result boxes a non-integer sample, so in a hot loop use `getOrDefault(i, 0)`. `getOrDefault(i)` with no default boxes the same way. `copyTo` of more than 32 samples allocates one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped). Iteration allocates an iterator. These numbers need V8 to inline the call: any call that is not inlined boxes a non-integer double it passes or returns (16 B), which is V8's calling convention, not this library. The test suite also includes a 1M-push smoke test that checks sub-MB retained heap growth under `--expose-gc`.
 
 ---
 

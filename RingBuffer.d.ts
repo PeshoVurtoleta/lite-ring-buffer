@@ -3,7 +3,9 @@ export declare const MAX_CAPACITY: number;
 
 /**
  * Smallest power of two >= n, for an integer n in [1, 2^32].
- * `ceilPow2(1) === 1`.
+ * `ceilPow2(1) === 1`. Inputs are not validated: a fraction above 1 behaves
+ * as `Math.floor(n)` (`ceilPow2(1.5) === 1`); `0 < n < 1`, NaN and +/-Infinity
+ * give 1; a finite `n <= 0` gives 2^32; `n > 2^32` wraps mod 2^32.
  */
 export declare function ceilPow2(n: number): number;
 
@@ -35,7 +37,7 @@ export class RingBuffer implements Iterable<number> {
     /** `capacity - 1`. Used in the wrap math. */
     readonly mask: number;
 
-    /** Backing storage. Set to `null` by `destroy()`. */
+    /** Backing storage. `destroy()` replaces it with a shared empty Float32Array. */
     readonly data: Float32Array;
 
     /** Write cursor; the next push lands at `data[head]`. Exposed for direct readers. */
@@ -69,11 +71,15 @@ export class RingBuffer implements Iterable<number> {
     /**
      * Sample at offset (0 = newest, count-1 = oldest).
      * @returns the sample, or `undefined` if `offset` is not an in-range integer.
+     * The `number | undefined` result boxes a non-integer sample (16 B per
+     * call, Node 26.8.2); in a hot loop use `getOrDefault(offset, 0)`.
      */
     get(offset: number): number | undefined;
 
     /**
-     * Sample at offset, or `defaultValue` if out of range.
+     * Sample at offset, or `defaultValue` if out of range (`undefined` when
+     * omitted). With a numeric default every path returns a number, so an
+     * inlined call does not box the sample.
      */
     getOrDefault(offset: number): number | undefined;
     getOrDefault<D>(offset: number, defaultValue: D): number | D;
@@ -92,7 +98,13 @@ export class RingBuffer implements Iterable<number> {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
+     * Up to 32 samples allocate nothing; larger copies allocate one short-lived
+     * `subarray` view per ring half (104 B each, Node 26.8.2).
      * @returns number of samples written (== this.count).
+     * @throws TypeError if `dst` is not a TypedArray, e.g. an Array or a DataView,
+     *         or is a BigInt64Array / BigUint64Array and count > 0 (nothing is
+     *         written). The bound uses the intrinsic TypedArray length, so a
+     *         subclass that overrides `length` cannot widen it.
      * @throws RangeError if `dstOffset` is not a non-negative integer or
      *         `dst.length < dstOffset + this.count` (nothing is written).
      */
@@ -108,8 +120,11 @@ export class RingBuffer implements Iterable<number> {
     reset(): void;
 
     /**
-     * Drop all references to backing storage.
-     * Calling any other method afterwards is undefined behavior.
+     * Drop the reference to the backing storage so the GC can reclaim it.
+     * `data` becomes a shared empty Float32Array (not `null`).
+     * Calling any other method afterwards is undefined behavior. `push`,
+     * `tryPush` and `reset` no longer throw: they do nothing, and `tryPush(v)`
+     * returns true without storing.
      */
     destroy(): void;
 }
