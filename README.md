@@ -292,7 +292,7 @@ flowchart LR
     CG --> UI
 ```
 
-Each stage holds zero allocation in steady state.
+`push` allocates nothing, but the read side is not yet allocation-free. `StatsMath` and `CanvasGraph` read the ring through `copyTo` into a capacity-sized scratch, and once the ring holds more than 32 samples each `copyTo` allocates 104 B (contiguous) or 208 B (wrapped). So each stats readout or graph frame allocates 104 B or 208 B (measured by `npm run alloc`, Node 26.8.2 arm64).
 
 ---
 

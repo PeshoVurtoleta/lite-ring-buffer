@@ -10,6 +10,8 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-14
+
 ### Fixed
 
 - `copyTo(dst)` with a `dst` that has no numeric `length` no longer slips
@@ -61,6 +63,11 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
   points hot loops at `getOrDefault(i, 0)` and states that every figure
   assumes V8 inlines the call. Also `destroy()`, `copyTo` allocation and
   errors, and the "no per-element loop" claim for small copies.
+- README Companion libraries: "Each stage holds zero allocation in steady
+  state" was false. `lite-stats-math` (`compute`, `quantile`) and
+  `lite-canvas-graph` (`render`) call `copyTo` with a capacity-sized
+  scratch, so once the ring holds more than 32 samples each call allocates
+  104 B contiguous or 208 B wrapped. The README now says so.
 
 ### Tests
 
