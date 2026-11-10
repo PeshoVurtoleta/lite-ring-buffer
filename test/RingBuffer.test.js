@@ -1,19 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { RingBuffer, ceilPow2, MAX_CAPACITY } from './RingBuffer.js';
+import { RingBuffer, ceilPow2, MAX_CAPACITY } from '../RingBuffer.js';
 
 describe('ceilPow2', () => {
     it('returns the smallest power of two >= n', () => {
         const cases = [[1, 1], [2, 2], [3, 4], [4, 4], [5, 8], [100, 128], [1024, 1024], [1025, 2048]];
-        for (const [n, want] of cases) expect(ceilPow2(n)).toBe(want);
+        for (const [n, want] of cases) assert.strictEqual(ceilPow2(n), want);
     });
 
     it('is exact at the 32-bit edges', () => {
-        expect(ceilPow2(2 ** 30 + 1)).toBe(2 ** 31);
-        expect(ceilPow2(2 ** 31 - 1)).toBe(2 ** 31);
-        expect(ceilPow2(2 ** 31)).toBe(2 ** 31);
-        expect(ceilPow2(2 ** 31 + 1)).toBe(2 ** 32);
-        expect(ceilPow2(2 ** 32)).toBe(2 ** 32);
+        assert.strictEqual(ceilPow2(2 ** 30 + 1), 2 ** 31);
+        assert.strictEqual(ceilPow2(2 ** 31 - 1), 2 ** 31);
+        assert.strictEqual(ceilPow2(2 ** 31), 2 ** 31);
+        assert.strictEqual(ceilPow2(2 ** 31 + 1), 2 ** 32);
+        assert.strictEqual(ceilPow2(2 ** 32), 2 ** 32);
     });
 
     it('behaves as documented outside [1, 2^32] (inputs are not validated)', () => {
@@ -24,148 +25,148 @@ describe('ceilPow2', () => {
             [NaN, 1], [Infinity, 1], [-Infinity, 1],
             [2 ** 32 + 1, 1], [2 ** 32 + 2, 2], [2 ** 33, 2 ** 32], // wraps mod 2^32
         ];
-        for (const [n, want] of cases) expect(ceilPow2(n)).toBe(want);
+        for (const [n, want] of cases) assert.strictEqual(ceilPow2(n), want);
     });
 });
 
-describe('RingBuffer — construction & validation', () => {
+describe('RingBuffer -- construction & validation', () => {
     it('rounds capacity up to next power of two', () => {
-        expect(new RingBuffer(1).capacity).toBe(1);
-        expect(new RingBuffer(2).capacity).toBe(2);
-        expect(new RingBuffer(3).capacity).toBe(4);
-        expect(new RingBuffer(5).capacity).toBe(8);
-        expect(new RingBuffer(100).capacity).toBe(128);
-        expect(new RingBuffer(1024).capacity).toBe(1024);
-        expect(new RingBuffer(1025).capacity).toBe(2048);
+        assert.strictEqual(new RingBuffer(1).capacity, 1);
+        assert.strictEqual(new RingBuffer(2).capacity, 2);
+        assert.strictEqual(new RingBuffer(3).capacity, 4);
+        assert.strictEqual(new RingBuffer(5).capacity, 8);
+        assert.strictEqual(new RingBuffer(100).capacity, 128);
+        assert.strictEqual(new RingBuffer(1024).capacity, 1024);
+        assert.strictEqual(new RingBuffer(1025).capacity, 2048);
     });
 
     it('preserves the original requested capacity', () => {
         const rb = new RingBuffer(100);
-        expect(rb.requestedCapacity).toBe(100);
-        expect(rb.capacity).toBe(128);
+        assert.strictEqual(rb.requestedCapacity, 100);
+        assert.strictEqual(rb.capacity, 128);
     });
 
     it('floors fractional capacities before rounding', () => {
         const rb = new RingBuffer(99.9);
-        expect(rb.requestedCapacity).toBe(99);
-        expect(rb.capacity).toBe(128);
+        assert.strictEqual(rb.requestedCapacity, 99);
+        assert.strictEqual(rb.capacity, 128);
     });
 
     it('defaults to 1024 when no argument is given', () => {
         const rb = new RingBuffer();
-        expect(rb.capacity).toBe(1024);
+        assert.strictEqual(rb.capacity, 1024);
     });
 
     it('rejects non-finite or non-positive capacities', () => {
-        expect(() => new RingBuffer(0)).toThrow(RangeError);
-        expect(() => new RingBuffer(-1)).toThrow(RangeError);
-        expect(() => new RingBuffer(NaN)).toThrow(RangeError);
-        expect(() => new RingBuffer(Infinity)).toThrow(RangeError);
-        expect(() => new RingBuffer('8')).toThrow(RangeError);
+        assert.throws(() => new RingBuffer(0), RangeError);
+        assert.throws(() => new RingBuffer(-1), RangeError);
+        assert.throws(() => new RingBuffer(NaN), RangeError);
+        assert.throws(() => new RingBuffer(Infinity), RangeError);
+        assert.throws(() => new RingBuffer('8'), RangeError);
     });
 
     it('rejects capacities above 2^31 instead of silently shrinking them', () => {
         // Previously 2**32 became capacity 1, and anything above 2^31 capacity 0.
-        expect(MAX_CAPACITY).toBe(2 ** 31);
-        expect(() => new RingBuffer(2 ** 31 + 1)).toThrow(RangeError);
-        expect(() => new RingBuffer(2 ** 32)).toThrow(RangeError);
-        expect(() => new RingBuffer(3e9)).toThrow(RangeError);
+        assert.strictEqual(MAX_CAPACITY, 2 ** 31);
+        assert.throws(() => new RingBuffer(2 ** 31 + 1), RangeError);
+        assert.throws(() => new RingBuffer(2 ** 32), RangeError);
+        assert.throws(() => new RingBuffer(3e9), RangeError);
     });
 
     it('throws a RangeError (not a TypeError) for a Symbol', () => {
-        expect(() => new RingBuffer(Symbol('x'))).toThrow(RangeError);
+        assert.throws(() => new RingBuffer(Symbol('x')), RangeError);
     });
 
     it('mask = capacity - 1', () => {
-        expect(new RingBuffer(64).mask).toBe(63);
-        expect(new RingBuffer(1).mask).toBe(0);
+        assert.strictEqual(new RingBuffer(64).mask, 63);
+        assert.strictEqual(new RingBuffer(1).mask, 0);
     });
 
     it('starts empty', () => {
         const rb = new RingBuffer(8);
-        expect(rb.count).toBe(0);
-        expect(rb.head).toBe(0);
-        expect(rb.isEmpty()).toBe(true);
-        expect(rb.isFull()).toBe(false);
+        assert.strictEqual(rb.count, 0);
+        assert.strictEqual(rb.head, 0);
+        assert.strictEqual(rb.isEmpty(), true);
+        assert.strictEqual(rb.isFull(), false);
     });
 });
 
-describe('RingBuffer — push & wrap', () => {
+describe('RingBuffer -- push & wrap', () => {
     let rb;
     beforeEach(() => { rb = new RingBuffer(4); });
 
     it('fills then wraps, overwriting oldest', () => {
         rb.push(1); rb.push(2); rb.push(3); rb.push(4);
-        expect(rb.count).toBe(4);
-        expect(rb.isFull()).toBe(true);
-        expect(rb.peekOldest()).toBe(1);
-        expect(rb.peekNewest()).toBe(4);
+        assert.strictEqual(rb.count, 4);
+        assert.strictEqual(rb.isFull(), true);
+        assert.strictEqual(rb.peekOldest(), 1);
+        assert.strictEqual(rb.peekNewest(), 4);
 
         rb.push(5);
-        expect(rb.count).toBe(4); // capped
-        expect(rb.peekOldest()).toBe(2);
-        expect(rb.peekNewest()).toBe(5);
+        assert.strictEqual(rb.count, 4); // capped
+        assert.strictEqual(rb.peekOldest(), 2);
+        assert.strictEqual(rb.peekNewest(), 5);
     });
 
     it('count saturates at capacity, never exceeds', () => {
         for (let i = 0; i < 100; i++) rb.push(i);
-        expect(rb.count).toBe(4);
-        expect(rb.peekNewest()).toBe(99);
-        expect(rb.peekOldest()).toBe(96);
+        assert.strictEqual(rb.count, 4);
+        assert.strictEqual(rb.peekNewest(), 99);
+        assert.strictEqual(rb.peekOldest(), 96);
     });
 
-    it('round-trips ±Infinity', () => {
+    it('round-trips +/-Infinity', () => {
         rb.push(Infinity); rb.push(-Infinity);
-        expect(rb.get(0)).toBe(-Infinity);
-        expect(rb.get(1)).toBe(Infinity);
+        assert.strictEqual(rb.get(0), -Infinity);
+        assert.strictEqual(rb.get(1), Infinity);
     });
 
     it('round-trips NaN', () => {
         rb.push(NaN);
-        expect(Number.isNaN(rb.get(0))).toBe(true);
+        assert.strictEqual(Number.isNaN(rb.get(0)), true);
     });
 });
 
-describe('RingBuffer — tryPush', () => {
+describe('RingBuffer -- tryPush', () => {
     it('overwrites by default (matches push)', () => {
         const rb = new RingBuffer(2);
         rb.push(1); rb.push(2);
-        expect(rb.tryPush(3)).toBe(true);
-        expect(rb.peekOldest()).toBe(2);
-        expect(rb.peekNewest()).toBe(3);
+        assert.strictEqual(rb.tryPush(3), true);
+        assert.strictEqual(rb.peekOldest(), 2);
+        assert.strictEqual(rb.peekNewest(), 3);
     });
 
     it('refuses when full and overwrite=false', () => {
         const rb = new RingBuffer(2);
         rb.push(1); rb.push(2);
-        expect(rb.tryPush(3, { overwrite: false })).toBe(false);
-        expect(rb.peekOldest()).toBe(1);
-        expect(rb.peekNewest()).toBe(2);
+        assert.strictEqual(rb.tryPush(3, { overwrite: false }), false);
+        assert.strictEqual(rb.peekOldest(), 1);
+        assert.strictEqual(rb.peekNewest(), 2);
     });
 
     it('still accepts when not full and overwrite=false', () => {
         const rb = new RingBuffer(2);
         rb.push(1);
-        expect(rb.tryPush(2, { overwrite: false })).toBe(true);
-        expect(rb.count).toBe(2);
+        assert.strictEqual(rb.tryPush(2, { overwrite: false }), true);
+        assert.strictEqual(rb.count, 2);
     });
 
     it('does not allocate when called without options (smoke check)', () => {
         const rb = new RingBuffer(64);
-        // No assertion target — just exercise the path.
+        // No assertion target -- just exercise the path.
         for (let i = 0; i < 1000; i++) rb.tryPush(i);
-        expect(rb.count).toBe(64);
+        assert.strictEqual(rb.count, 64);
     });
 
     it('treats null options like no options', () => {
         const rb = new RingBuffer(1);
         rb.push(1);
-        expect(rb.tryPush(2, null)).toBe(true);
-        expect(rb.peekNewest()).toBe(2);
+        assert.strictEqual(rb.tryPush(2, null), true);
+        assert.strictEqual(rb.peekNewest(), 2);
     });
 });
 
-describe('RingBuffer — get / getOrDefault', () => {
+describe('RingBuffer -- get / getOrDefault', () => {
     let rb;
     beforeEach(() => {
         rb = new RingBuffer(4);
@@ -173,37 +174,37 @@ describe('RingBuffer — get / getOrDefault', () => {
     });
 
     it('get(0) is the newest', () => {
-        expect(rb.get(0)).toBe(30);
+        assert.strictEqual(rb.get(0), 30);
     });
 
     it('get(count-1) is the oldest', () => {
-        expect(rb.get(2)).toBe(10);
+        assert.strictEqual(rb.get(2), 10);
     });
 
     it('returns undefined when out of range', () => {
-        expect(rb.get(-1)).toBeUndefined();
-        expect(rb.get(3)).toBeUndefined();
-        expect(rb.get(100)).toBeUndefined();
+        assert.strictEqual(rb.get(-1), undefined);
+        assert.strictEqual(rb.get(3), undefined);
+        assert.strictEqual(rb.get(100), undefined);
     });
 
     it('returns undefined for non-integer offsets', () => {
         // Previously NaN / undefined / 0.5 / '1' all read some live slot.
-        expect(rb.get(NaN)).toBeUndefined();
-        expect(rb.get()).toBeUndefined();
-        expect(rb.get(0.5)).toBeUndefined();
-        expect(rb.get('1')).toBeUndefined();
-        expect(rb.get(Symbol('x'))).toBeUndefined();
-        expect(rb.getOrDefault(NaN, -1)).toBe(-1);
+        assert.strictEqual(rb.get(NaN), undefined);
+        assert.strictEqual(rb.get(), undefined);
+        assert.strictEqual(rb.get(0.5), undefined);
+        assert.strictEqual(rb.get('1'), undefined);
+        assert.strictEqual(rb.get(Symbol('x')), undefined);
+        assert.strictEqual(rb.getOrDefault(NaN, -1), -1);
     });
 
     it('getOrDefault without a default returns undefined when out of range', () => {
-        expect(rb.getOrDefault(3)).toBeUndefined();
+        assert.strictEqual(rb.getOrDefault(3), undefined);
     });
 
     it('getOrDefault returns default for out-of-range', () => {
-        expect(rb.getOrDefault(-1, -999)).toBe(-999);
-        expect(rb.getOrDefault(100, 0)).toBe(0);
-        expect(rb.getOrDefault(0, -999)).toBe(30);
+        assert.strictEqual(rb.getOrDefault(-1, -999), -999);
+        assert.strictEqual(rb.getOrDefault(100, 0), 0);
+        assert.strictEqual(rb.getOrDefault(0, -999), 30);
     });
 
     it('getOrDefault agrees with get for every in-range offset, including after wrap', () => {
@@ -212,32 +213,32 @@ describe('RingBuffer — get / getOrDefault', () => {
         for (let i = 1; i <= 13; i++) wrap.push(i + 0.25);
         for (let k = -2; k < 11; k++) {
             const want = wrap.get(k);
-            expect(wrap.getOrDefault(k, -1)).toBe(want === undefined ? -1 : want);
+            assert.strictEqual(wrap.getOrDefault(k, -1), want === undefined ? -1 : want);
         }
         for (const bad of [NaN, 0.5, '1', undefined, Symbol('x')]) {
-            expect(wrap.getOrDefault(bad, -1)).toBe(-1);
+            assert.strictEqual(wrap.getOrDefault(bad, -1), -1);
         }
     });
 
     it('addresses correctly after wrap', () => {
         const wrap = new RingBuffer(4);
         for (let i = 1; i <= 6; i++) wrap.push(i); // overwrites 1, 2
-        expect(wrap.get(0)).toBe(6);
-        expect(wrap.get(1)).toBe(5);
-        expect(wrap.get(2)).toBe(4);
-        expect(wrap.get(3)).toBe(3);
-        expect(wrap.peekOldest()).toBe(3);
+        assert.strictEqual(wrap.get(0), 6);
+        assert.strictEqual(wrap.get(1), 5);
+        assert.strictEqual(wrap.get(2), 4);
+        assert.strictEqual(wrap.get(3), 3);
+        assert.strictEqual(wrap.peekOldest(), 3);
     });
 });
 
-describe('RingBuffer — copyTo', () => {
+describe('RingBuffer -- copyTo', () => {
     it('writes oldest-first in the unwrapped case', () => {
         const rb = new RingBuffer(8);
         for (let i = 1; i <= 5; i++) rb.push(i);
         const out = new Float32Array(8);
         const n = rb.copyTo(out, 0);
-        expect(n).toBe(5);
-        expect(Array.from(out.subarray(0, 5))).toEqual([1, 2, 3, 4, 5]);
+        assert.strictEqual(n, 5);
+        assert.deepStrictEqual(Array.from(out.subarray(0, 5)), [1, 2, 3, 4, 5]);
     });
 
     it('writes oldest-first in the wrapped case', () => {
@@ -245,7 +246,7 @@ describe('RingBuffer — copyTo', () => {
         for (let i = 1; i <= 7; i++) rb.push(i); // overwrites 1, 2, 3
         const out = new Float32Array(4);
         rb.copyTo(out, 0);
-        expect(Array.from(out)).toEqual([4, 5, 6, 7]);
+        assert.deepStrictEqual(Array.from(out), [4, 5, 6, 7]);
     });
 
     it('respects dstOffset', () => {
@@ -253,31 +254,31 @@ describe('RingBuffer — copyTo', () => {
         rb.push(1); rb.push(2); rb.push(3);
         const out = new Float32Array(8);
         const n = rb.copyTo(out, 3);
-        expect(n).toBe(3);
-        expect(Array.from(out)).toEqual([0, 0, 0, 1, 2, 3, 0, 0]);
+        assert.strictEqual(n, 3);
+        assert.deepStrictEqual(Array.from(out), [0, 0, 0, 1, 2, 3, 0, 0]);
     });
 
     it('returns 0 when empty and does not touch destination', () => {
         const rb = new RingBuffer(4);
         const out = new Float32Array([99, 99, 99, 99]);
-        expect(rb.copyTo(out, 0)).toBe(0);
-        expect(Array.from(out)).toEqual([99, 99, 99, 99]);
+        assert.strictEqual(rb.copyTo(out, 0), 0);
+        assert.deepStrictEqual(Array.from(out), [99, 99, 99, 99]);
     });
 
     it('throws on a too-small destination without a partial write', () => {
         const rb = new RingBuffer(4);
         for (let i = 1; i <= 6; i++) rb.push(i); // wrapped: two-segment copy
         const out = new Float32Array([9, 9, 9]);
-        expect(() => rb.copyTo(out, 0)).toThrow(RangeError);
-        expect(Array.from(out)).toEqual([9, 9, 9]);
-        expect(() => rb.copyTo(new Float32Array(8), 5)).toThrow(RangeError);
+        assert.throws(() => rb.copyTo(out, 0), RangeError);
+        assert.deepStrictEqual(Array.from(out), [9, 9, 9]);
+        assert.throws(() => rb.copyTo(new Float32Array(8), 5), RangeError);
     });
 
     it('rejects negative or non-integer offsets', () => {
         const rb = new RingBuffer(4);
         rb.push(1);
-        expect(() => rb.copyTo(new Float32Array(4), -1)).toThrow(RangeError);
-        expect(() => rb.copyTo(new Float32Array(4), 0.5)).toThrow(RangeError);
+        assert.throws(() => rb.copyTo(new Float32Array(4), -1), RangeError);
+        assert.throws(() => rb.copyTo(new Float32Array(4), 0.5), RangeError);
     });
 
     it('copies into a Float64Array', () => {
@@ -285,32 +286,32 @@ describe('RingBuffer — copyTo', () => {
         for (let i = 1; i <= 6; i++) rb.push(i);
         const out = new Float64Array(4);
         rb.copyTo(out);
-        expect(Array.from(out)).toEqual([3, 4, 5, 6]);
+        assert.deepStrictEqual(Array.from(out), [3, 4, 5, 6]);
     });
 
     it('rejects a dst with no length instead of silently returning', () => {
         // Previously `n > undefined` was false: an empty buffer returned 0 for
         // copyTo({}), a non-empty one threw "dst.set is not a function".
         const empty = new RingBuffer(4);
-        expect(() => empty.copyTo({})).toThrow(TypeError);
-        expect(() => empty.copyTo({ set() {} })).toThrow(TypeError);
+        assert.throws(() => empty.copyTo({}), TypeError);
+        assert.throws(() => empty.copyTo({ set() {} }), TypeError);
         const rb = new RingBuffer(4);
         rb.push(1);
-        expect(() => rb.copyTo({})).toThrow(TypeError);
-        expect(() => rb.copyTo({ set() {}, length: 4 })).toThrow(TypeError);
+        assert.throws(() => rb.copyTo({}), TypeError);
+        assert.throws(() => rb.copyTo({ set() {}, length: 4 }), TypeError);
     });
 
     it('rejects a non-TypedArray dst with a TypeError', () => {
         const rb = new RingBuffer(4);
         rb.push(1);
-        expect(() => rb.copyTo(null)).toThrow(TypeError);
-        expect(() => rb.copyTo(undefined)).toThrow(TypeError);
-        expect(() => rb.copyTo([0, 0, 0, 0])).toThrow(TypeError);
-        expect(() => rb.copyTo(42)).toThrow(TypeError);
-        expect(() => rb.copyTo(new Map())).toThrow(TypeError);
-        expect(() => rb.copyTo(new DataView(new ArrayBuffer(16)))).toThrow(TypeError);
-        expect(() => rb.copyTo(vm.runInNewContext('new DataView(new ArrayBuffer(64))'))).toThrow(TypeError);
-        expect(() => rb.copyTo(Object.create(null))).toThrow('copyTo needs a TypedArray dst (got object)');
+        assert.throws(() => rb.copyTo(null), TypeError);
+        assert.throws(() => rb.copyTo(undefined), TypeError);
+        assert.throws(() => rb.copyTo([0, 0, 0, 0]), TypeError);
+        assert.throws(() => rb.copyTo(42), TypeError);
+        assert.throws(() => rb.copyTo(new Map()), TypeError);
+        assert.throws(() => rb.copyTo(new DataView(new ArrayBuffer(16))), TypeError);
+        assert.throws(() => rb.copyTo(vm.runInNewContext('new DataView(new ArrayBuffer(64))')), TypeError);
+        assert.throws(() => rb.copyTo(Object.create(null)), { message: /copyTo needs a TypedArray dst \(got object\)/ });
     });
 
     it('bounds-checks against the real length, not an overridden getter', () => {
@@ -319,16 +320,16 @@ describe('RingBuffer — copyTo', () => {
         const rb = new RingBuffer(8);
         for (let i = 1; i <= 5; i++) rb.push(i);
         const dst = new Liar(2);
-        expect(() => rb.copyTo(dst)).toThrow(RangeError);
-        expect(Array.from(new Float32Array(dst.buffer))).toEqual([0, 0]);
+        assert.throws(() => rb.copyTo(dst), RangeError);
+        assert.deepStrictEqual(Array.from(new Float32Array(dst.buffer)), [0, 0]);
     });
 
     it('accepts other TypedArray kinds', () => {
         const rb = new RingBuffer(4);
         for (let i = 1; i <= 6; i++) rb.push(i);
         const i32 = new Int32Array(4);
-        expect(rb.copyTo(i32)).toBe(4);
-        expect(Array.from(i32)).toEqual([3, 4, 5, 6]);
+        assert.strictEqual(rb.copyTo(i32), 4);
+        assert.deepStrictEqual(Array.from(i32), [3, 4, 5, 6]);
     });
 
     // Up to 32 samples go through the scalar loop, more through set + subarray.
@@ -355,18 +356,18 @@ describe('RingBuffer — copyTo', () => {
             const seq = [];
             for (let i = 1; i <= pushes; i++) { rb.push(i + 0.25); seq.push(i + 0.25); }
             const want = seq.slice(seq.length - n);
-            expect(rb.count).toBe(n);
-            expect(((rb.head - rb.count) & rb.mask) + rb.count > rb.capacity).toBe(wrapped);
-            expect(n <= 32).toBe(path === 'loop');
+            assert.strictEqual(rb.count, n);
+            assert.strictEqual(((rb.head - rb.count) & rb.mask) + rb.count > rb.capacity, wrapped);
+            assert.strictEqual(n <= 32, path === 'loop');
 
             const f32 = new Float32Array(n + 3).fill(-1);
-            expect(rb.copyTo(f32, 2)).toBe(n);
-            expect(Array.from(f32.subarray(2, 2 + n))).toEqual(want);
-            expect([f32[0], f32[1], f32[f32.length - 1]]).toEqual([-1, -1, -1]);
+            assert.strictEqual(rb.copyTo(f32, 2), n);
+            assert.deepStrictEqual(Array.from(f32.subarray(2, 2 + n)), want);
+            assert.deepStrictEqual([f32[0], f32[1], f32[f32.length - 1]], [-1, -1, -1]);
 
             const f64 = new Float64Array(n);
-            expect(rb.copyTo(f64)).toBe(n);
-            expect(Array.from(f64)).toEqual(want);
+            assert.strictEqual(rb.copyTo(f64), n);
+            assert.deepStrictEqual(Array.from(f64), want);
         });
     }
     // No-allocation is gated by test/alloc.mjs (npm run alloc). A heapUsed delta
@@ -374,13 +375,13 @@ describe('RingBuffer — copyTo', () => {
     // 0.96 MB over 100k copies, under a 1 MB bound.
 });
 
-describe('RingBuffer — iteration', () => {
+describe('RingBuffer -- iteration', () => {
     it('forEach visits oldest-first with index', () => {
         const rb = new RingBuffer(4);
         for (let i = 1; i <= 6; i++) rb.push(i);
         const seen = [];
-        rb.forEach((v, i, self) => { seen.push([v, i]); expect(self).toBe(rb); });
-        expect(seen).toEqual([[3, 0], [4, 1], [5, 2], [6, 3]]);
+        rb.forEach((v, i, self) => { seen.push([v, i]); assert.strictEqual(self, rb); });
+        assert.deepStrictEqual(seen, [[3, 0], [4, 1], [5, 2], [6, 3]]);
     });
 
     it('is iterable oldest-first and matches copyTo', () => {
@@ -388,28 +389,28 @@ describe('RingBuffer — iteration', () => {
         for (let i = 1; i <= 11; i++) rb.push(i);
         const out = new Float32Array(rb.count);
         rb.copyTo(out);
-        expect([...rb]).toEqual(Array.from(out));
-        expect([...rb]).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+        assert.deepStrictEqual([...rb], Array.from(out));
+        assert.deepStrictEqual([...rb], [4, 5, 6, 7, 8, 9, 10, 11]);
     });
 
     it('yields nothing when empty', () => {
         const rb = new RingBuffer(4);
-        expect([...rb]).toEqual([]);
+        assert.deepStrictEqual([...rb], []);
         let calls = 0;
         rb.forEach(() => calls++);
-        expect(calls).toBe(0);
+        assert.strictEqual(calls, 0);
     });
 });
 
-describe('RingBuffer — reset & destroy', () => {
+describe('RingBuffer -- reset & destroy', () => {
     it('reset zeroes data and resets state', () => {
         const rb = new RingBuffer(4);
         rb.push(1); rb.push(2); rb.push(3);
         rb.reset();
-        expect(rb.count).toBe(0);
-        expect(rb.head).toBe(0);
-        expect(rb.isEmpty()).toBe(true);
-        for (let i = 0; i < rb.capacity; i++) expect(rb.data[i]).toBe(0);
+        assert.strictEqual(rb.count, 0);
+        assert.strictEqual(rb.head, 0);
+        assert.strictEqual(rb.isEmpty(), true);
+        for (let i = 0; i < rb.capacity; i++) assert.strictEqual(rb.data[i], 0);
     });
 
     it('reset preserves capacity and storage identity', () => {
@@ -417,8 +418,8 @@ describe('RingBuffer — reset & destroy', () => {
         const before = rb.data;
         rb.push(1);
         rb.reset();
-        expect(rb.data).toBe(before);
-        expect(rb.capacity).toBe(4);
+        assert.strictEqual(rb.data, before);
+        assert.strictEqual(rb.capacity, 4);
     });
 
     it('destroy releases the backing storage', () => {
@@ -426,10 +427,10 @@ describe('RingBuffer — reset & destroy', () => {
         const before = rb.data;
         rb.push(1);
         rb.destroy();
-        expect(rb.data).not.toBe(before);
-        expect(rb.capacity).toBe(0);
-        expect(rb.count).toBe(0);
-        expect(rb.mask).toBe(0);
+        assert.notStrictEqual(rb.data, before);
+        assert.strictEqual(rb.capacity, 0);
+        assert.strictEqual(rb.count, 0);
+        assert.strictEqual(rb.mask, 0);
     });
 
     it('destroy leaves an empty Float32Array, not null', () => {
@@ -438,31 +439,32 @@ describe('RingBuffer — reset & destroy', () => {
         const b = new RingBuffer(8);
         a.destroy();
         b.destroy();
-        expect(a.data).toBeInstanceOf(Float32Array);
-        expect(a.data.length).toBe(0);
-        expect(b.data).toBe(a.data); // one shared empty array, no per-destroy allocation
+        assert.ok(a.data instanceof Float32Array);
+        assert.strictEqual(a.data.length, 0);
+        assert.strictEqual(b.data, a.data); // one shared empty array, no per-destroy allocation
     });
 });
 
-describe('RingBuffer — zero-GC hot-path smoke test', () => {
+describe('RingBuffer -- zero-GC hot-path smoke test', () => {
     it('pushes 1M samples without throwing', () => {
         const rb = new RingBuffer(8192);
         for (let i = 0; i < 1_000_000; i++) rb.push(Math.sin(i * 0.001));
-        expect(rb.count).toBe(8192);
-        expect(rb.isFull()).toBe(true);
+        assert.strictEqual(rb.count, 8192);
+        assert.strictEqual(rb.isFull(), true);
     });
 
     it('measured heap delta over 1M pushes is sub-MB', () => {
-        if (!global.gc) return; // requires --expose-gc; skip otherwise
+        // Fails closed: npm test runs node --expose-gc, so gc must be there.
+        assert.strictEqual(typeof globalThis.gc, 'function');
         const rb = new RingBuffer(4096);
         // warm up
         for (let i = 0; i < 10_000; i++) rb.push(i);
-        global.gc();
+        globalThis.gc();
         const before = process.memoryUsage().heapUsed;
         for (let i = 0; i < 1_000_000; i++) rb.push(i);
-        global.gc();
+        globalThis.gc();
         const after = process.memoryUsage().heapUsed;
         const deltaMB = (after - before) / (1024 * 1024);
-        expect(deltaMB).toBeLessThan(1);
+        assert.ok(deltaMB < 1);
     });
 });

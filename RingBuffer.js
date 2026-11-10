@@ -103,7 +103,7 @@ export class RingBuffer {
         }
         /** @type {number} the capacity the caller asked for, before pow2 rounding */
         this.requestedCapacity = Math.floor(requestedCapacity);
-        /** @type {number} actual storage size — always a power of two */
+        /** @type {number} actual storage size -- always a power of two */
         this.capacity = ceilPow2(this.requestedCapacity);
         /** @type {number} bitmask for wrap-around: `i & mask` instead of `i % capacity` */
         this.mask = this.capacity - 1;
@@ -198,7 +198,7 @@ export class RingBuffer {
      * Arguments are checked up front, so a bad call throws without `dst`
      * being partially written.
      *
-     * @param {Float32Array|Float64Array} dst destination — caller owns it.
+     * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number} [dstOffset=0]
      * @returns {number} number of samples written (== this.count).
      * @throws {TypeError} if `dst` is not a TypedArray (a DataView is rejected

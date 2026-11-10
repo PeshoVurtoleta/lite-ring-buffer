@@ -31,7 +31,7 @@ export class RingBuffer implements Iterable<number> {
     /** Capacity the caller asked for (floored), before pow2 rounding. */
     readonly requestedCapacity: number;
 
-    /** Actual storage size — always a power of two. */
+    /** Actual storage size -- always a power of two. */
     readonly capacity: number;
 
     /** `capacity - 1`. Used in the wrap math. */

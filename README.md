@@ -17,15 +17,15 @@ One allocation for the lifetime of the buffer. No `Array.shift`, no slicing, no 
 ```js
 import { RingBuffer } from '@zakkster/lite-ring-buffer';
 
-const fps = new RingBuffer(1024);                  // → capacity = 1024 (already a pow2)
+const fps = new RingBuffer(1024);                  // -> capacity = 1024 (already a pow2)
 
-// Hot path — drop a sample every frame.
+// Hot path -- drop a sample every frame.
 function onFrame(dt) {
   fps.push(1000 / dt);
 }
 
 // Read out the most recent sample.
-fps.peekNewest();           // → 60.0
+fps.peekNewest();           // -> 60.0
 
 // Bulk-copy the entire window into your renderer / stats engine.
 const window = new Float32Array(fps.count);
@@ -36,18 +36,19 @@ fps.copyTo(window, 0);      // window[0] is oldest, window[count-1] is newest
 
 ## Contents
 
-- [Why](#why) · [Install](#install) · [Quick start](#quick-start)
+- [Why](#why) | [Install](#install) | [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [API reference](#api-reference)
 - [Edge cases & guarantees](#edge-cases--guarantees)
+- [Testing](#testing)
 - [Companion libraries](#companion-libraries)
-- [FAQ](#faq) · [License](#license)
+- [FAQ](#faq) | [License](#license)
 
 ---
 
 ## Why
 
-You're sampling something — frame times, audio levels, mouse velocity, network RTT — and you want a sliding window of the last N values to render, average, or quantile.
+You're sampling something -- frame times, audio levels, mouse velocity, network RTT -- and you want a sliding window of the last N values to render, average, or quantile.
 
 The code you write first looks like this:
 
@@ -62,7 +63,7 @@ function pushSample(v) {
 
 Two problems compound at 60 fps:
 
-1. `Array.shift()` is **O(n)** — every frame you re-index 1023 elements just to drop the front one.
+1. `Array.shift()` is **O(n)** -- every frame you re-index 1023 elements just to drop the front one.
 2. The array is a *generic* JS array. Each entry is a boxed double; growth and resize trigger fresh allocations and shape transitions; the GC sees a moving target.
 
 `@zakkster/lite-ring-buffer` collapses both costs:
@@ -85,7 +86,7 @@ flowchart LR
     end
 ```
 
-The buffer is a `Float32Array` so reads and writes are unboxed `number → IEEE-754 float32` round trips — the same memory representation a GPU vertex buffer or a `<canvas>` waveform expects.
+The buffer is a `Float32Array` so reads and writes are unboxed `number -> IEEE-754 float32` round trips -- the same memory representation a GPU vertex buffer or a `<canvas>` waveform expects.
 
 ---
 
@@ -101,7 +102,7 @@ ESM-only. No dependencies. Ships TypeScript definitions alongside the source.
 import { RingBuffer } from '@zakkster/lite-ring-buffer';
 ```
 
-You can also drop `RingBuffer.js` into your project directly — it's one file with no imports.
+You can also drop `RingBuffer.js` into your project directly -- it's one file with no imports.
 
 ---
 
@@ -155,7 +156,7 @@ const graph = new CanvasGraph(canvas, 600, 200);
 
 function frame(dtMs) {
   rb.push(dtMs);
-  graph.render(rb, 33.34);   // expected max ≈ 30 fps budget
+  graph.render(rb, 33.34);   // expected max ~= 30 fps budget
   requestAnimationFrame(frame);
 }
 ```
@@ -164,7 +165,7 @@ function frame(dtMs) {
 
 ## How it works
 
-### Power-of-two capacity → bitmask wrap
+### Power-of-two capacity -> bitmask wrap
 
 The constructor rounds the requested capacity up to the next power of two:
 
@@ -175,7 +176,7 @@ The constructor rounds the requested capacity up to the next power of two:
 | 1024 | 1024 | 1023 |
 | 1025 | 2048 | 2047 |
 
-Wrap-around becomes `head = (head + 1) & mask` — a single AND instead of a `%` modulo, which on V8 is roughly 3–5× cheaper in tight loops.
+Wrap-around becomes `head = (head + 1) & mask` -- a single AND instead of a `%` modulo, which on V8 is roughly 3-5× cheaper in tight loops.
 
 ### Layout
 
@@ -190,7 +191,7 @@ flowchart LR
     N[newest sample] -.-> A4
 ```
 
-Once the buffer is full (`count === capacity`), `head` chases the oldest sample around the ring. There is no "front pointer" — the oldest is always at offset `(head - count + capacity) & mask`.
+Once the buffer is full (`count === capacity`), `head` chases the oldest sample around the ring. There is no "front pointer" -- the oldest is always at offset `(head - count + capacity) & mask`.
 
 ### Oldest-first bulk copy
 
@@ -202,12 +203,12 @@ flowchart TB
         direction LR
         R5["5"]:::oldest --- R6["6"] --- R7["7"] --- R0["0"] --- R1["1"] --- R2["2"] --- R3["3"] --- R4["4"]:::newest
     end
-    subgraph D["dst : Float32Array — oldest-first"]
+    subgraph D["dst : Float32Array -- oldest-first"]
         direction LR
         D0["[0] = data[5]"] --- D1["[1] = data[6]"] --- D2["[2] = data[7]"] --- D3["[3] = data[0]"] --- D4["[4] = data[1]"] --- D5["[5] = data[2]"] --- D6["[6] = data[3]"] --- D7["[7] = data[4]"]
     end
-    R5 -. "copy 1: data[5..8] → dst[0..3]" .-> D0
-    R0 -. "copy 2: data[0..5] → dst[3..8]" .-> D3
+    R5 -. "copy 1: data[5..8] -> dst[0..3]" .-> D0
+    R0 -. "copy 2: data[0..5] -> dst[3..8]" .-> D3
     classDef oldest fill:#882,color:#fff
     classDef newest fill:#288,color:#fff
 ```
@@ -233,7 +234,7 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `requestedCapacity` | `number` (readonly) | What the caller asked for, before pow2 rounding. |
 | `capacity` | `number` (readonly) | Actual storage size. Always a power of two. |
 | `count` | `number` | Live samples, `0..capacity`. |
-| `head` | `number` | Write cursor. Internal — exposed for inspection only. |
+| `head` | `number` | Write cursor. Internal -- exposed for inspection only. |
 | `mask` | `number` | `capacity - 1`. Used in the wrap math. |
 | `data` | `Float32Array` | Backing storage. A shared empty `Float32Array` after `destroy()`. |
 
@@ -268,24 +269,46 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 
 - **Capacity is always rounded up.** `new RingBuffer(100).capacity === 128`. The original is preserved on `requestedCapacity` so you can size sibling structures (e.g. a stats scratchpad) to either value as needed.
 - **`get(0)` is the newest.** Any offset that is not an integer in `[0, count)` (negative, out of range, `NaN`, fractional, non-number) returns `undefined` (`get`) or the default (`getOrDefault`). They never throw.
-- **NaN and ±Infinity round-trip.** They store and read back unchanged. Downstream stats consumers must filter NaN themselves; `@zakkster/lite-stats-math` does this for you.
+- **NaN and +/-Infinity round-trip.** They store and read back unchanged. Downstream stats consumers must filter NaN themselves; `@zakkster/lite-stats-math` does this for you.
 - **`tryPush` does not allocate when called without options.** The implementation reads the option object by property access (no destructuring default), so `tryPush(v)` is hot-path-safe just like `push(v)`.
 - **`reset()` zeroes the backing memory.** The library's own reads are bounded by `count` and never see old slots; zeroing protects consumers that read `data` directly. The cost is one `Float32Array.fill(0)` (O(capacity)), which is a single memset in V8.
 - **`destroy()` is final.** It swaps `data` for a shared empty `Float32Array` so the GC can reclaim the backing buffer in long-lived applications. It does not assign `null`: that would widen the `data` field's tracked type in V8 from `Float32Array` to any value for every live instance (seen with `--trace-generalization`, Node 26.8.2). The trade-off: `push`, `tryPush` and `reset` after `destroy()` used to throw a `TypeError` on `null`; now they do nothing, and `tryPush(v)` returns `true` without storing. Reads were already empty. After `destroy()`, the instance is unusable, and nothing tells you so.
-- **Hot-path zero-allocation.** Measured by `npm run alloc` (`test/alloc.mjs`, V8's allocated-bytes counter, 1M calls per window, Node 26.8.2 arm64) in a monomorphic hot loop, with non-integer samples: `push`, `tryPush(v)`, `getOrDefault(i, n)` with a numeric default, `peekNewest`, `peekOldest`, `isFull`, `isEmpty`, `forEach` (with a hoisted callback) and `copyTo` of up to 32 samples allocate 0 B per call. `get(i)` allocates 16 B per call: its `number | undefined` result boxes a non-integer sample, so in a hot loop use `getOrDefault(i, 0)`. `getOrDefault(i)` with no default boxes the same way. `copyTo` of more than 32 samples allocates one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped). Iteration allocates an iterator. These numbers need V8 to inline the call: any call that is not inlined boxes a non-integer double it passes or returns (16 B), which is V8's calling convention, not this library. The test suite also includes a 1M-push smoke test that checks sub-MB retained heap growth under `--expose-gc`.
+- **Hot-path zero-allocation.** Measured by `npm run alloc` (`test/alloc.mjs`, V8's allocated-bytes counter, 1M calls per window, Node 26.8.2 arm64) in a monomorphic hot loop, with non-integer samples: `push`, `tryPush(v)`, `getOrDefault(i, n)` with a numeric default, `peekNewest`, `peekOldest`, `isFull`, `isEmpty`, `forEach` (with a hoisted callback) and `copyTo` of up to 32 samples allocate 0 B per call. `get(i)` allocates 16 B per call: its `number | undefined` result boxes a non-integer sample, so in a hot loop use `getOrDefault(i, 0)`. `getOrDefault(i)` with no default boxes the same way. `copyTo` of more than 32 samples allocates one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped). Iteration allocates an iterator. These numbers need V8 to inline the call: any call that is not inlined boxes a non-integer double it passes or returns (16 B), which is V8's calling convention, not this library. `npm test` runs under `--expose-gc` and includes a 1M-push smoke test that checks sub-MB retained heap growth; that test fails (it does not skip) when gc is not exposed.
+
+---
+
+## Testing
+
+The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_bytes`). The runtime `engines` field stays `>=18`.
+
+| Script | What it runs |
+| --- | --- |
+| `npm test` | `node --expose-gc --test test/RingBuffer.test.js`: exactly that one file, 59 `node:test` cases. The 1M-push heap smoke test fails (not skips) when gc is not exposed. |
+| `npm run alloc` | `test/alloc.mjs`: per-call allocated bytes for every hot method. This is the per-op byte gate. |
+| `npm run torture` | `test/torture.mjs` (dev-only): lite-leak retention and lite-gc-profiler GC budget (below). |
+| `npm run ascii` | `test/ascii.mjs`: fails on any non-ASCII character in `package.json`, the `files[]` entries and `test/` (U+00D7 and U+00B5 are allowed). |
+| `npm run verify` | `npm test && npm run alloc && npm run torture && npm run ascii` |
+
+`npm run torture` checks:
+
+- **Retention (lite-leak).** 4096 churned `RingBuffer`s drain to tracker size 0, and the backing `data` of 256 still-live instances is reclaimed after `destroy()`.
+- **GC budget (lite-gc-profiler).** Major 0 / minor 0 collections over 2,000,000 ops on each of 6 lanes: `push` + `tryPush` on a full ring; `getOrDefault` in and out of range; `peekNewest` / `peekOldest` / `isFull` / `isEmpty`; `forEach` over 32; `copyTo` of 32 samples (contiguous and wrapped) into Float32 and Float64; `push` x32 + `reset`. A control lane must collect or the run fails.
+- **Reported, not gated.** `copyTo` of more than 32 samples and `get(i)` allocate by design (the `subarray` views, and the `number | undefined` box).
+
+GC-count resolution is about 2 B/op at 2,000,000 ops (semi-space size not pinned, so it can drift), so `npm run alloc` remains the per-op byte gate.
 
 ---
 
 ## Companion libraries
 
-- **[@zakkster/lite-stats-math](https://www.npmjs.com/package/@zakkster/lite-stats-math)** — single-pass avg/min/max/quantile over a `RingBuffer`, with a NaN-filtering compaction step.
-- **[@zakkster/lite-canvas-graph](https://www.npmjs.com/package/@zakkster/lite-canvas-graph)** — zero-GC `<canvas>` waveform renderer that reads a `RingBuffer` directly. Decimates to per-pixel min/max envelopes when the sample count exceeds canvas width.
+- **[@zakkster/lite-stats-math](https://www.npmjs.com/package/@zakkster/lite-stats-math)** -- single-pass avg/min/max/quantile over a `RingBuffer`, with a NaN-filtering compaction step.
+- **[@zakkster/lite-canvas-graph](https://www.npmjs.com/package/@zakkster/lite-canvas-graph)** -- zero-GC `<canvas>` waveform renderer that reads a `RingBuffer` directly. Decimates to per-pixel min/max envelopes when the sample count exceeds canvas width.
 
 The three together form a complete telemetry pipeline:
 
 ```mermaid
 flowchart LR
-    A[sample source<br/>rAF · audio · network] --> RB(RingBuffer)
+    A[sample source<br/>rAF / audio / network] --> RB(RingBuffer)
     RB --> SM[StatsMath]
     RB --> CG[CanvasGraph]
     SM --> UI[label / overlay]
@@ -302,19 +325,19 @@ flowchart LR
 Because `head & mask` is a single instruction; `head % capacity` is a division. The cost difference is invisible on a single call but very real in tight emit loops where `push` is called once per frame *per metric* across dozens of metrics.
 
 **Why `Float32Array` and not `Float64Array`?**
-Two reasons: (1) telemetry numbers — frame times in ms, audio amplitudes, mouse velocity in px/s — fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` is a memcpy with no conversion.
+Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` is a memcpy with no conversion.
 
 **Can I push integers?**
-Yes — they'll be implicitly converted to float32 on store, and read back losslessly for any value `|x| < 2^24`. Larger integers will lose precision; for u32 telemetry use a u32-backed sibling library or pack into the 24-bit mantissa.
+Yes -- they'll be implicitly converted to float32 on store, and read back losslessly for any value `|x| < 2^24`. Larger integers will lose precision; for u32 telemetry use a u32-backed sibling library or pack into the 24-bit mantissa.
 
 **Why is `tryPush` slower than `push` in microbenchmarks?**
 It branches on the `options` argument and the full state. For most callers `push` is the right choice; reach for `tryPush` only when discarding samples on overflow is a *correctness* requirement (e.g. lossy network ingest).
 
 **Can I share a `RingBuffer` across a `Worker`?**
-Not directly — the `Float32Array` lives in the main thread's heap. For cross-thread streaming, build the typed array on a `SharedArrayBuffer` yourself and adopt the same head/mask discipline; the algorithm is the same.
+Not directly -- the `Float32Array` lives in the main thread's heap. For cross-thread streaming, build the typed array on a `SharedArrayBuffer` yourself and adopt the same head/mask discipline; the algorithm is the same.
 
 ---
 
 ## License
 
-MIT © Zahary Shinikchiev
+MIT (c) Zahary Shinikchiev

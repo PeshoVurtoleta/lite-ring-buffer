@@ -6,7 +6,7 @@
 
 `@zakkster/lite-ring-buffer` is a zero-dependency ESM micro-library that maintains a sliding window of float32 samples without allocating during steady-state operation. It is designed for telemetry windows (frame times, audio amplitudes, network RTT, mouse velocity) where the naive `Array.push + Array.shift` pattern produces O(n) shifts and per-frame GC pressure.
 
-The buffer is backed by a single `Float32Array` whose length is the next power of two ≥ the requested capacity. Wrap-around uses a bitmask AND (`head & mask`) instead of a modulo. The hot-path `push(value)` performs one indexed store, a masked increment and a compare, with no allocation.
+The buffer is backed by a single `Float32Array` whose length is the next power of two >= the requested capacity. Wrap-around uses a bitmask AND (`head & mask`) instead of a modulo. The hot-path `push(value)` performs one indexed store, a masked increment and a compare, with no allocation.
 
 ## Core API
 
@@ -15,11 +15,11 @@ import { RingBuffer } from '@zakkster/lite-ring-buffer';
 
 const rb = new RingBuffer(1024);            // capacity rounded up to next pow2
 rb.push(42);                                // O(1), zero alloc
-rb.peekNewest();                            // → 42
-rb.peekOldest();                            // → 42 (only one sample)
-rb.count;                                   // → 1
-rb.capacity;                                // → 1024
-rb.isFull();                                // → false
+rb.peekNewest();                            // -> 42
+rb.peekOldest();                            // -> 42 (only one sample)
+rb.count;                                   // -> 1
+rb.capacity;                                // -> 1024
+rb.isFull();                                // -> false
 
 const out = new Float32Array(rb.count);
 rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
@@ -30,7 +30,7 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 - **Capacity** is rounded up to the next power of two so wrap-around can use a bitmask. The original request is preserved on `.requestedCapacity`.
 - **`get(offset)`** uses 0 for newest, `count-1` for oldest. Returns `undefined` if out of range. Its `number | undefined` result boxes a non-integer sample (16 B per call); in a hot loop use **`getOrDefault(offset, 0)`**, which allocates nothing.
 - **`copyTo(dst, dstOffset)`** writes oldest-first. Up to 32 samples use an allocation-free scalar loop; larger copies use at most two `TypedArray.set` calls (one per ring half), each backed by a memcpy in V8. A `dst` that is not a TypedArray (an Array, a DataView, a plain object) throws `TypeError`; a too-small one throws `RangeError`. Nothing is written in either case.
-- **`tryPush(value, options)`** mirrors `push` but returns `false` when the buffer is full and `options.overwrite === false`. The options argument is read by property access — no destructuring default — so `tryPush(v)` does not allocate.
+- **`tryPush(value, options)`** mirrors `push` but returns `false` when the buffer is full and `options.overwrite === false`. The options argument is read by property access -- no destructuring default -- so `tryPush(v)` does not allocate.
 - **`reset()`** clears the buffer and fills the backing storage with zeros so consumers that read `data` directly never see old samples.
 - **`forEach(fn)` / `[Symbol.iterator]`** visit samples oldest-first, matching `copyTo`.
 - **`ceilPow2(n)`** and **`MAX_CAPACITY`** (2^31) are exported helpers. Capacities above 2^31 throw `RangeError`.
@@ -40,7 +40,7 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 
 - ESM only.
 - Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision.
-- NaN and ±Infinity are stored and read back unchanged. Downstream consumers must filter NaN where it matters (e.g. min/max).
+- NaN and +/-Infinity are stored and read back unchanged. Downstream consumers must filter NaN where it matters (e.g. min/max).
 - After `destroy()` the instance is unusable.
 - Not thread-safe. For cross-Worker streaming, the consumer must implement the head/mask discipline against a `SharedArrayBuffer`.
 
@@ -48,12 +48,13 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 
 - `push`, `tryPush(v)`, `getOrDefault(i, 0)` and `peek*` are O(1) and allocate 0 B per call in a hot loop where V8 inlines them (`npm run alloc`, Node 26.8.2). `get(i)` allocates 16 B per call on non-integer samples.
 - `copyTo` is O(n). Up to 32 samples it allocates nothing; above that it is a memcpy plus one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped).
-- 1M `push` calls into a 4096-slot buffer produce sub-MB heap growth (verified by the test suite under `--expose-gc`).
+- `npm run torture` (`test/torture.mjs`, dev-only): lite-leak retention (4096 churned instances drain to tracker size 0; the backing `data` of 256 live instances is reclaimed after `destroy()`) and a lite-gc-profiler budget of major 0 / minor 0 over 2,000,000 ops on each of 6 gated lanes, with a control lane that must collect. `copyTo` of more than 32 samples and `get(i)` are reported, not gated. GC-count resolution is about 2 B/op at 2,000,000 ops (semi-space size not pinned, so it can drift), so `npm run alloc` remains the per-op byte gate.
+- 1M `push` calls into a 4096-slot buffer produce sub-MB heap growth (`npm test` runs under `--expose-gc`; the smoke test fails, not skips, when gc is not exposed; dev scripts need Node >= 24).
 
 ## Companion libraries
 
-- `@zakkster/lite-stats-math` — single-pass avg/min/max/quantile over a `RingBuffer`.
-- `@zakkster/lite-canvas-graph` — zero-GC `<canvas>` waveform renderer that consumes a `RingBuffer` directly.
+- `@zakkster/lite-stats-math` -- single-pass avg/min/max/quantile over a `RingBuffer`.
+- `@zakkster/lite-canvas-graph` -- zero-GC `<canvas>` waveform renderer that consumes a `RingBuffer` directly.
 
 ## License
 
