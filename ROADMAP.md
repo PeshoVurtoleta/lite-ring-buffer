@@ -1,5 +1,7 @@
 # lite-ring-buffer roadmap
 
+Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote its laws.
+
 Baseline: `main` is 1.2.0 (`0412025`; it shipped the `e3e1df1` audit fixes and the alloc gate). R1 and R2 are
 still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
 `pushBatch`.
@@ -77,7 +79,8 @@ Finding (2026-10-14): `StatsMath.compute` / `quantile` (`LiteStatsMath/StatsMath
 `CanvasGraph.render` (`LiteCanvasGraph/CanvasGraph.js:157`) call `copyTo` with a capacity-sized scratch,
 typically 1024 samples. Above 32 samples `copyTo` takes the `set` + `subarray` path: 104 B per call
 contiguous, 208 B wrapped (measured, Node 26.8.2). So README's "Each stage holds zero allocation in steady
-state" (the Ecosystem diagram) is false today: every frame of a graph or stats readout allocates.
+state" (the Ecosystem diagram) was false until 1.2.0 (fixed in 0412025, step 3): every frame of a graph or stats
+readout allocates.
 
 At fleet scale (NOMINAL arithmetic, not a measurement): 10,000 windows x 10 Hz is 100,000 `copyTo` calls per
 second, about 10-20 MB/s of garbage from one rendering path.
@@ -94,8 +97,8 @@ a JS loop. Plan:
    n); (b) loop up to the size where it falls behind, plus an opt-in `copyTo(dst, off, { fast: true })` for
    memcpy. Option (b) must not allocate an options object at the call site. A cutoff tuned above 1024
    covers both companions.
-3. Until then: fix the README Ecosystem line to state the 104 / 208 B per frame. Docs-only; it can go out
-   with the next release.
+3. DONE in 1.2.0 (0412025): the README Ecosystem line now states the 104 / 208 B per frame. (Was: until
+   then, fix the line; docs-only.)
 
 Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, expected 0 if option (a) or (b) covers that
 size.
@@ -139,7 +142,7 @@ Oracle: for every (capacity, head, count, n) in a small matrix, the result equal
 
 ## Docs-only fillers
 
-- README Ecosystem line: state the R1 104 / 208 B per frame until R1 lands (R1 step 3).
+- README Ecosystem line: DONE in 1.2.0 (0412025), R1 step 3; the README states the 104 / 208 B per frame.
 - README / llms.txt NOT FOR ("integers above 2^24"): add the monotonic energy-counter example (Wh totals
   belong in the caller's Float64 columns, not in this ring).
 
