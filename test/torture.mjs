@@ -18,6 +18,20 @@
  * minor >= 1, or the profiler is blind and the run fails. Two lanes are
  * REPORTED, never gated: copyTo of 1024 wrapped samples (the documented
  * set + subarray path, 2 views per call) and get(i) (boxes its result).
+ * get(i) stays REPORTED, not a second CONTROL: its 16 B/op reads only a few
+ * minors over HOT ops and can read 0 once V8 grows new space, which would be a
+ * flake in a deterministic gate. Its 16 B teeth are gated deterministically by
+ * test/alloc.mjs `CONTROL get(i), one 16 B box`.
+ *
+ * res= on the GATE line is the minor-GC gate's resolution: the CONTROL lane's
+ * alloc B/op divided by its minor count (= control bytes per minor / HOT ops).
+ * A gated lane allocating less than res B/op can finish its window with
+ * minor 0, so "minor 0" proves less than res B/op, not 0 B/op. 'n/a' when the
+ * control read minor 0 or the alloc counter is missing. It drifts upward when
+ * V8 grows new space. Printed, never gated (test/alloc.mjs gates B/op).
+ *
+ * Retention: churn() must leave exactly CYCLES instances tracked mid-run; a
+ * tracker that missed any of them would make "live=0" prove less.
  *
  * alloc B/op on each lane is V8's total_allocated_bytes delta over the window /
  * ops (Node >= 24). One window carries a fixed 0.03-1 MB of tier-up and runtime
@@ -332,16 +346,20 @@ for (const r of rows) {
     if (!r.ok) lanesOk = false;
 }
 
-const retentionOk = trackedMid >= 1 && live === 0 && findings.length === 0;
+const retentionOk = trackedMid === CYCLES && live === 0 && findings.length === 0;
 const dataOk = dataMid === HELD && dataLive === 0 && heldAlive === HELD && dataFindings.length === 0;
 const ok = lanesOk && retentionOk && dataOk;
 
 console.log('retention: trackedMid=' + trackedMid + ' live=' + live + ' drains=' + DRAIN_ROUNDS[0] + ' findings=' + findings.length +
     ' | held data: tracked=' + dataMid + ' live=' + dataLive + ' drains=' + DRAIN_ROUNDS[1] + ' instancesAlive=' + heldAlive + '/' + HELD);
+// Gate resolution: control bytes per minor / HOT ops ('n/a' if minor 0 or NaN).
+const ctlRow = rows.find((r) => r.kind === 'control');
+const res = ctlRow && ctlRow.minor > 0 ? ctlRow.bop / ctlRow.minor : NaN;
 console.log(
     'GATE leak=size ' + live + '/0 findings=' + (findings.length + dataFindings.length) +
     ' warnings=' + warns.length +
     ' | gc major=' + gMajor + ' minor=' + gMinor + ' maxMs=' + gMaxMs.toFixed(2) +
+    ' res=' + (res === res ? res.toFixed(2) : 'n/a') + ' B/op' +
     ' | alloc=' + fmtB(gAlloc) + ' B/op (worst gated lane net of baseline ' + fmtB(baseBop) + '; reported)' +
     ' | ' + (ok ? 'ok' : 'FAIL')
 );
@@ -359,7 +377,7 @@ if (!ok) {
             console.error('  lane "' + r.name + '" violation ' + v.metric + ' limit=' + v.limit + ' actual=' + v.actual);
         }
     }
-    if (!(trackedMid >= 1)) console.error('  retention: tracker held nothing mid-run (vacuous)');
+    if (trackedMid !== CYCLES) console.error('  retention: tracked ' + trackedMid + ' of ' + CYCLES + ' mid-run (want exact)');
     if (live !== 0) console.error('  retention: ' + live + ' RingBuffer instances outlived their scope');
     for (const f of findings) console.error('  finding ' + f.kind + ':' + f.reason);
     if (dataMid !== HELD) console.error('  held data: tracked ' + dataMid + ' of ' + HELD);

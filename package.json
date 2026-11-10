@@ -23,7 +23,7 @@
     "LICENSE.txt"
   ],
   "scripts": {
-    "test": "node --expose-gc --test test/RingBuffer.test.js",
+    "test": "node test/count.mjs",
     "alloc": "node --expose-gc test/alloc.mjs",
     "torture": "node --expose-gc test/torture.mjs",
     "ascii": "node test/ascii.mjs",

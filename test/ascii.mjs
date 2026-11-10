@@ -18,16 +18,15 @@ function scanText(text, onHit) {
 }
 
 // Self-control, written with escapes so this file stays ASCII.
-{
-  const hits = [];
-  scanText('a\u2014b\u00A9\u0080\u{1F600}', (l, c) => hits.push(c));
-  const ok = hits.length === 4 && hits[0] === 0x2014 && hits[1] === 0xA9 && hits[2] === 0x80 && hits[3] === 0x1F600;
-  const hits2 = [];
-  scanText('\u00D7\u00B5', (l, c) => hits2.push(c));
-  if (!ok || hits2.length !== 0) {
-    console.error('ascii: self-control FAILED (must flag U+2014, U+00A9, U+0080, U+1F600 as 4 code points; must pass U+00D7 and U+00B5)');
-    process.exit(2);
-  }
+const selfHits = [];
+scanText('a\u2014b\u00A9\u0080\u{1F600}', (l, c) => selfHits.push(c));
+const selfHits2 = [];
+scanText('\u00D7\u00B5', (l, c) => selfHits2.push(c));
+const selfOk = selfHits.length === 4 && selfHits[0] === 0x2014 && selfHits[1] === 0xA9 && selfHits[2] === 0x80 &&
+  selfHits[3] === 0x1F600 && selfHits2.length === 0;
+if (!selfOk) {
+  console.error('ascii: self-control FAILED (must flag U+2014, U+00A9, U+0080, U+1F600 as 4 code points; must pass U+00D7 and U+00B5)');
+  process.exit(2);
 }
 
 const root = path.resolve(process.argv[2] || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));

@@ -41,9 +41,8 @@ A new feature here must serve the telemetry -> canvas / stats pipeline, keep `da
 
 ### D -- carried debt (suite law, not features)
 
-STATUS 2026-11-10: DONE in the working tree (reviewer APPROVED B1-B4, qa PASS A1-A5), awaiting the
-maintainer's commit. The closing `npm run verify` under the quiet lock is PENDING (lock BUSY). Follow-ups:
-D2 below. Spec and evidence: `.handoff/D/` (gitignored).
+STATUS 2026-11-10: committed 1d6e368 (2026-11-10); closing `npm run verify` under the quiet lock
+2026-11-10 07:17Z exit 0, host PRELIMINARY (load1 5.14 vs baseline 2.21). Follow-ups: D2 below. Spec and evidence: `.handoff/D/` (gitignored).
 
 ShellyProject's proof layer cites this package's zero-GC claim, so suite law must hold. One tooling batch:
 - migrate the tests from vitest to `node:test` (`package.json` `test` script included);
@@ -54,17 +53,23 @@ files finds nothing.
 
 ### D2 -- gate-teeth follow-ups from unit D's review / qa (small tooling + docs batch)
 
-- Test-count floor: an emptied `test/RingBuffer.test.js` still passes `npm test` (tests 0 / exit 0). Add
-  `test/count.mjs` (node:test `run()` over the explicit file list with `--expose-gc`, exit 1 unless the pass
-  count equals the expected count and there is no failure), wire `"count"` and append it to `verify`. Every
-  later unit that adds a `*.test.js` updates both the `test` script and the expected count.
-- Docs label: "GC-count resolution is about 2 B/op" in README Testing, llms.txt and CHANGELOG is DERIVED
-  (control lane 104.2 B/op x 2,000,000 / 49 minor GCs), not measured: label it "nominal" with that
-  derivation, or have the torture GATE line print it.
-- Torture: `trackedMid >= 1` -> `=== CYCLES` (exact; finalizers cannot run inside the synchronous churn).
-- Torture: consider promoting the `get(i)` lane from REPORTED to a second CONTROL (proves the gate sees a
-  16 B box every run). Changes the lane taxonomy: planner decides.
-- test/ascii.mjs: flatten the self-control's bare `{}` block (lite-law flat module code).
+STATUS 2026-11-10: done in the working tree (reviewer APPROVED, qa PASS), awaiting the maintainer's commit;
+closing `npm run verify` under the quiet lock 2026-11-10 07:50Z exit 0, host PRELIMINARY (load1 3.63 vs
+baseline 2.21), Node v26.8.2; log .handoff/D2/qa/q7-verify.txt.
+
+- Test-count floor (DONE, R-2): `npm test` = `node test/count.mjs` (node:test `run()` over the explicit file
+  list with `--expose-gc`; fails unless exactly 59 tests pass, 0 fail, 0 skipped / todo, no failed suite, no
+  empty file). `verify` is unchanged and there is no separate count script; `FILES` and `EXPECTED` live together
+  in `test/count.mjs`. This deviates from the original first bullet (a separate `"count"` script appended to
+  `verify`). Every later unit that adds or removes a test updates `EXPECTED` (a test file: `FILES` too). Lost: `npm test --
+  --test-name-pattern` passthrough (extra args are read as test files).
+- Docs label (DONE): the GC-count resolution is nominal; torture prints it as `res=`; no value is stated in
+  docs because it depends on V8 new-space size.
+- Torture (DONE): retention requires exactly 4096 instances tracked mid-run.
+- `get(i)` lane (DONE, R-4): stays REPORTED in torture; its 16 B tooth is `test/alloc.mjs` `CONTROL get(i)`.
+- `test/ascii.mjs` (DONE): self-control flattened to flat module code.
+- FILLER: `count.mjs` passes no `run()` timeout: a never-settling test hangs the gate (plain `node --test`
+  behaves the same); add a bounded timeout + a must-fail control.
 
 ### R1 -- copyTo allocates at the sizes the ecosystem actually uses (bug-grade)
 

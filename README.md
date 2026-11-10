@@ -283,7 +283,7 @@ The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_by
 
 | Script | What it runs |
 | --- | --- |
-| `npm test` | `node --expose-gc --test test/RingBuffer.test.js`: exactly that one file, 59 `node:test` cases. The 1M-push heap smoke test fails (not skips) when gc is not exposed. |
+| `npm test` | `node test/count.mjs`: runs `test/RingBuffer.test.js` through `node:test` `run()` under `--expose-gc`, then fails unless exactly 59 tests pass with 0 failed and 0 skipped or todo, one passing run summary and one per-file summary per file, no failed suite and no file with zero tests. An empty, skipped, crashed or early-exiting test file fails. Adding or removing a test updates `EXPECTED` in `test/count.mjs` (a test file: `FILES` too). Extra arguments are read as test files, so `--test-name-pattern` is not passed through. The 1M-push heap smoke test fails (not skips) when gc is not exposed. |
 | `npm run alloc` | `test/alloc.mjs`: per-call allocated bytes for every hot method. This is the per-op byte gate. |
 | `npm run torture` | `test/torture.mjs` (dev-only): lite-leak retention and lite-gc-profiler GC budget (below). |
 | `npm run ascii` | `test/ascii.mjs`: fails on any non-ASCII character in `package.json`, the `files[]` entries and `test/` (U+00D7 and U+00B5 are allowed). |
@@ -291,11 +291,11 @@ The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_by
 
 `npm run torture` checks:
 
-- **Retention (lite-leak).** 4096 churned `RingBuffer`s drain to tracker size 0, and the backing `data` of 256 still-live instances is reclaimed after `destroy()`.
+- **Retention (lite-leak).** 4096 churned `RingBuffer`s: all 4096 are tracked mid-run (exact count gated) and `tracker.size()` must drain to 0, and the backing `data` of 256 still-live instances is reclaimed after `destroy()`.
 - **GC budget (lite-gc-profiler).** Major 0 / minor 0 collections over 2,000,000 ops on each of 6 lanes: `push` + `tryPush` on a full ring; `getOrDefault` in and out of range; `peekNewest` / `peekOldest` / `isFull` / `isEmpty`; `forEach` over 32; `copyTo` of 32 samples (contiguous and wrapped) into Float32 and Float64; `push` x32 + `reset`. A control lane must collect or the run fails.
 - **Reported, not gated.** `copyTo` of more than 32 samples and `get(i)` allocate by design (the `subarray` views, and the `number | undefined` box).
 
-GC-count resolution is about 2 B/op at 2,000,000 ops (semi-space size not pinned, so it can drift), so `npm run alloc` remains the per-op byte gate.
+GC-count resolution is nominal: torture prints it as `res=` (the CONTROL lane's B/op divided by its minor-GC count) on the GATE line, and it depends on the V8 new-space size, so a gated lane reading minor 0 proves it allocates less than `res` B/op, not 0 B/op. `npm run alloc` is the per-op byte gate.
 
 ---
 
