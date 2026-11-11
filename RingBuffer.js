@@ -69,15 +69,6 @@ export function ceilPow2(n) {
 const EMPTY_F32 = new Float32Array(0);
 
 /**
- * At or below this many samples, `copyTo` uses a scalar loop, which allocates
- * nothing (0 B/op, `test/alloc.mjs`). Above it, `set` + `subarray` allocates
- * one 104 B view per ring half (Node 26.8.2). The cutoff of 32 is nominal: the
- * loop is expected to keep pace with memcpy at this size, but that timing has
- * not been measured yet.
- */
-const COPY_LOOP_MAX = 32;
-
-/**
  * The intrinsic %TypedArray%.prototype.length getter. `copyTo` bounds-checks
  * against it, not `dst.length`: a subclass can override `length`, and the
  * scalar loop would then drop its out-of-range stores silently. It also
@@ -85,6 +76,47 @@ const COPY_LOOP_MAX = 32;
  * cannot see.
  */
 const TA_LENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Float32Array.prototype), 'length').get;
+
+/**
+ * The rest of the %TypedArray%.prototype intrinsics `copyTo` / `copyToFast`
+ * use, captured once at module load so a subclass (or a patched prototype)
+ * cannot change what they read or write:
+ *  - TA_TAG: the Symbol.toStringTag getter, the array's real element type
+ *    ('Float32Array' for a subclass too; undefined for a non-TypedArray).
+ *  - TA_BUFFER: the `buffer` getter, for the alias check. A subclass's own
+ *    `buffer` getter can lie; this one cannot.
+ *  - TA_SET / TA_COPY_WITHIN: the `set` and `copyWithin` methods.
+ */
+const TA_PROTO = Object.getPrototypeOf(Float32Array.prototype);
+const TA_TAG = Object.getOwnPropertyDescriptor(TA_PROTO, Symbol.toStringTag).get;
+const TA_BUFFER = Object.getOwnPropertyDescriptor(TA_PROTO, 'buffer').get;
+const TA_SET = TA_PROTO.set;
+const TA_COPY_WITHIN = TA_PROTO.copyWithin;
+
+/**
+ * Cold-path error builders shared by `copyTo` and `copyToFast`; `name` is the
+ * calling method, so each message names the method that threw. Kept out of
+ * the method bodies so the string building costs no bytes there.
+ */
+function dstTypeError(name, dst) {
+    // typeof, not String(dst): an Array would be joined, a null-prototype object throws.
+    return new TypeError(
+        'LiteRingBuffer: ' + name + ' needs a TypedArray dst (got ' + (dst === null ? 'null' : typeof dst) + ')'
+    );
+}
+
+function boundsError(name, c, dstOffset, dlen) {
+    return new RangeError(
+        'LiteRingBuffer: ' + name + ' needs ' + c + ' slots from offset ' + String(dstOffset) +
+        ' (dst.length ' + dlen + ')'
+    );
+}
+
+function aliasError(name) {
+    return new RangeError(
+        'LiteRingBuffer: ' + name + ' dst shares the ring\'s buffer (copy into a separate array); nothing written'
+    );
+}
 
 export class RingBuffer {
     /**
@@ -189,14 +221,23 @@ export class RingBuffer {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
+     * Allocates nothing, at any count.
      *
-     * Up to 32 samples are copied by a scalar loop, which allocates nothing.
-     * Larger copies are at most two `TypedArray.set` calls (one per ring half),
-     * each backed by a memcpy in V8; each call allocates one `subarray` view
-     * per ring half (104 B each in Node 26.8.2), and no sample data is copied twice.
+     * A full ring copied into a Float32Array (a subclass counts; the type is
+     * read through the intrinsic Symbol.toStringTag getter) is one intrinsic
+     * `set` of the whole storage, then one intrinsic `copyWithin` and a scalar
+     * loop over the smaller ring half to rotate it into order. Every other
+     * case is a masked scalar loop. `set`, `copyWithin`, `buffer` and `length`
+     * are the %TypedArray%.prototype intrinsics captured at module load, so a
+     * subclass that overrides them cannot change what is written. For the
+     * `set` + `subarray` copy (allocates one view per ring half), see
+     * `copyToFast`.
      *
      * Arguments are checked up front, so a bad call throws without `dst`
-     * being partially written.
+     * being partially written. Order: TypeError (not a TypedArray), RangeError
+     * (bounds), return 0 when the ring is empty, RangeError (alias) -- all
+     * before the first store -- then a BigInt `dst` throws TypeError from that
+     * first store. So an aliasing BigInt64Array gets the alias RangeError.
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number} [dstOffset=0]
@@ -205,38 +246,81 @@ export class RingBuffer {
      *         too), or is a BigInt64Array / BigUint64Array and count > 0.
      *         Nothing is written.
      * @throws {RangeError} if `dstOffset` is not a non-negative integer or
-     *         `dst` cannot hold `count` samples from `dstOffset`.
+     *         `dst` cannot hold `count` samples from `dstOffset`; or, when
+     *         count > 0, if `dst` shares the ring's buffer (its ArrayBuffer,
+     *         read through the intrinsic `buffer` getter, is `this.data`'s).
+     *         The alias check runs before the first store, so an aliasing
+     *         BigInt `dst` gets this RangeError, not the TypeError.
+     *         Nothing is written.
      */
     copyTo(dst, dstOffset = 0) {
         // isView alone also admits a DataView, which has no indexed slots or `set`.
-        if (!ArrayBuffer.isView(dst) || dst instanceof DataView) {
-            // typeof, not String(dst): an Array would be joined, a null-prototype object throws.
-            throw new TypeError(
-                'LiteRingBuffer: copyTo needs a TypedArray dst (got ' + (dst === null ? 'null' : typeof dst) + ')'
-            );
-        }
+        if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError('copyTo', dst);
         const dlen = TA_LENGTH.call(dst);
         const c = this.count;
         // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
         if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + c <= dlen)) {
-            throw new RangeError(
-                'LiteRingBuffer: copyTo needs ' + c + ' slots from offset ' + String(dstOffset) +
-                ' (dst.length ' + dlen + ')'
-            );
+            throw boundsError('copyTo', c, dstOffset, dlen);
         }
         if (c === 0) return 0;
         const data = this.data;
+        // Fail closed: copying a ring into its own storage would overwrite
+        // samples before they are read.
+        if (TA_BUFFER.call(dst) === TA_BUFFER.call(data)) throw aliasError('copyTo');
         const mask = this.mask;
         const start = (this.head - c) & mask;
-        if (c <= COPY_LOOP_MAX) {
-            for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
+        if (c === this.capacity && TA_TAG.call(dst) === 'Float32Array') {
+            // Full ring: start === head. Copy storage as-is, then rotate it.
+            const cap = c;
+            const a = cap - start;
+            TA_SET.call(dst, data, dstOffset);
+            if (start !== 0) {
+                if (start <= a) {
+                    TA_COPY_WITHIN.call(dst, dstOffset, dstOffset + start, dstOffset + cap);
+                    for (let i = 0; i < start; i++) dst[dstOffset + a + i] = data[i];
+                } else {
+                    TA_COPY_WITHIN.call(dst, dstOffset + a, dstOffset, dstOffset + start);
+                    for (let i = 0; i < a; i++) dst[dstOffset + i] = data[start + i];
+                }
+            }
             return c;
         }
-        const firstLen = Math.min(this.capacity - start, c);
+        for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
+        return c;
+    }
 
-        dst.set(data.subarray(start, start + firstLen), dstOffset);
+    /**
+     * Same copy, result, validation and errors as `copyTo` (the messages name
+     * `copyToFast`), including the alias RangeError. Copies with at most two
+     * intrinsic `set` calls over `subarray` views, one per ring half, so it
+     * allocates: one view per ring half (104 B for a contiguous copy, 208 B
+     * wrapped: `npm run alloc` lanes `copyToFast 1024, contiguous` /
+     * `wrapped`, Node 26.8.2 arm64). `copyTo` allocates nothing.
+     *
+     * @param {Float32Array|Float64Array} dst destination -- caller owns it.
+     * @param {number} [dstOffset=0]
+     * @returns {number} number of samples written (== this.count).
+     * @throws {TypeError} as `copyTo`. Nothing is written.
+     * @throws {RangeError} as `copyTo` (bad offset, `dst` too small, or `dst`
+     *         sharing the ring's buffer). The alias check runs before the
+     *         first store, so an aliasing BigInt `dst` gets this RangeError,
+     *         not the TypeError. Nothing is written.
+     */
+    copyToFast(dst, dstOffset = 0) {
+        if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError('copyToFast', dst);
+        const dlen = TA_LENGTH.call(dst);
+        const c = this.count;
+        if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + c <= dlen)) {
+            throw boundsError('copyToFast', c, dstOffset, dlen);
+        }
+        if (c === 0) return 0;
+        const data = this.data;
+        if (TA_BUFFER.call(dst) === TA_BUFFER.call(data)) throw aliasError('copyToFast');
+        const start = (this.head - c) & this.mask;
+        const firstLen = Math.min(this.capacity - start, c);
+        TA_SET.call(dst, data.subarray(start, start + firstLen), dstOffset);
         if (firstLen < c) {
-            dst.set(data.subarray(0, c - firstLen), dstOffset + firstLen);
+            TA_SET.call(dst, data.subarray(0, c - firstLen), dstOffset + firstLen);
         }
         return c;
     }

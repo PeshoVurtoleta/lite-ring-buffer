@@ -98,17 +98,44 @@ export class RingBuffer implements Iterable<number> {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
-     * Up to 32 samples allocate nothing; larger copies allocate one short-lived
-     * `subarray` view per ring half (104 B each, Node 26.8.2).
+     * Allocates nothing at any size in steady state (gated by `npm run alloc`);
+     * the first alias check on an on-heap (<= 64 B) ring or `dst` materializes
+     * its ArrayBuffer once. A full ring into a Float32Array is one intrinsic
+     * `set` + `copyWithin` rotation plus a scalar loop over the smaller ring
+     * half; every other copy is a scalar loop. `set`, `copyWithin`, `buffer` and
+     * `length` are the %TypedArray%.prototype intrinsics, so a subclass that
+     * overrides them cannot change what is written.
+     *
+     * Checks run in this order, all before the first store: TypeError (not a
+     * TypedArray), RangeError (bounds), return 0 when the ring is empty,
+     * RangeError (alias), then the first store -- so an aliasing BigInt `dst`
+     * gets the alias RangeError, not a TypeError.
      * @returns number of samples written (== this.count).
      * @throws TypeError if `dst` is not a TypedArray, e.g. an Array or a DataView,
      *         or is a BigInt64Array / BigUint64Array and count > 0 (nothing is
      *         written). The bound uses the intrinsic TypedArray length, so a
      *         subclass that overrides `length` cannot widen it.
      * @throws RangeError if `dstOffset` is not a non-negative integer or
-     *         `dst.length < dstOffset + this.count` (nothing is written).
+     *         `dst.length < dstOffset + this.count`; or, when count > 0, if
+     *         `dst` shares the ring's ArrayBuffer (read through the intrinsic
+     *         `buffer` getter). Nothing is written.
      */
     copyTo(dst: Float32Array | Float64Array, dstOffset?: number): number;
+
+    /**
+     * Same copy, result, validation order and errors as {@link copyTo} (the
+     * messages name `copyToFast`), including the alias RangeError. Copies with
+     * at most two intrinsic `set` calls over `subarray` views, one per ring
+     * half, so it ALLOCATES: 104 B per contiguous call, 208 B per wrapped call
+     * (`npm run alloc` lanes `copyToFast 1024, contiguous` / `wrapped`,
+     * Node 26.8.2 arm64). Not for a zero-GC hot path; `copyTo` allocates
+     * nothing.
+     * @returns number of samples written (== this.count).
+     * @throws TypeError as `copyTo`. Nothing is written.
+     * @throws RangeError as `copyTo` (bad offset, `dst` too small, or `dst`
+     *         sharing the ring's buffer). Nothing is written.
+     */
+    copyToFast(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
     /** Visit live samples oldest -> newest. Zero allocation with a hoisted callback. */
     forEach(fn: (value: number, index: number, rb: RingBuffer) => void): void;

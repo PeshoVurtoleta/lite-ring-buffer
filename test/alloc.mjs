@@ -21,6 +21,18 @@
  * within +/-1 B, and every comparison fails on NaN, so a blind or broken
  * counter cannot pass.
  *
+ * copyTo lanes: a capacity-1024 ring covers both copy routes -- a full ring
+ * into a Float32Array (intrinsic set + copyWithin + rotate: head 0, start n/2,
+ * start > n/2) and the masked loop (non-full, and every Float64Array dst). The
+ * capacity-8 lane keeps data and dst ON-HEAP: the alias check reads their
+ * intrinsic `buffer`, which materializes an ArrayBuffer once (window 0, never
+ * floored on); the steady state must still be 0. copyToFast (set + subarray,
+ * one view per ring half) is REPORTED, never gated.
+ *
+ * A build without copyToFast: the default target fails closed (exit 2); an
+ * explicit build path (revert / must-fail runs on an older build) prints its
+ * copyToFast rows as 'n/a' and gates the rest.
+ *
  * Inlining matters: a method that returns a non-integer double boxes its result
  * whenever the call is NOT inlined (V8 returns tagged values). Run with
  * `--no-turbo-inlining` to see that lane; the docs state it.
@@ -35,6 +47,11 @@ const REPORT = args.includes('--report');
 const target = args.find((a) => !a.startsWith('--'));
 const url = target ? pathToFileURL(resolve(target)).href : new URL('../RingBuffer.js', import.meta.url).href;
 const { RingBuffer } = await import(url);
+const HAS_FAST = typeof RingBuffer.prototype.copyToFast === 'function';
+if (!HAS_FAST && !target) {
+    process.stderr.write('alloc: RingBuffer.js has no copyToFast (fail closed; pass an explicit build path for a revert run)\n');
+    process.exit(2);
+}
 
 if (typeof globalThis.gc !== 'function') {
     process.stderr.write('alloc: needs node --expose-gc\n');
@@ -98,8 +115,19 @@ const lanes = [
     ['copyTo 32, contiguous', 0, () => { const rb = filled(32, 32); const out = new Float32Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
     ['copyTo 32, wrapped', 0, () => { const rb = filled(32, 50); const out = new Float32Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
     ['copyTo 32 -> Float64Array, wrapped', 0, () => { const rb = filled(32, 50); const out = new Float64Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
-    ['copyTo 33, contiguous (set path)', 'report', () => { const rb = filled(64, 33); const out = new Float32Array(64); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
-    ['copyTo 64, wrapped (set path)', 'report', () => { const rb = filled(64, 100); const out = new Float32Array(64); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 33, contiguous', 0, () => { const rb = filled(64, 33); const out = new Float32Array(64); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 64, wrapped', 0, () => { const rb = filled(64, 100); const out = new Float32Array(64); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    // Capacity 1024: 1024 pushes -> head 0 (start 0); +512 -> start n/2; +768 -> start > n/2.
+    ['copyTo 1024 F32, full, head 0', 0, () => { const rb = filled(1024, 1024); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 1024 F32, full, start 512', 0, () => { const rb = filled(1024, 1536); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 1024 F32, full, start 768', 0, () => { const rb = filled(1024, 1792); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 1023 F32, non-full', 0, () => { const rb = filled(1024, 1023); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 1024 -> Float64Array, contiguous', 0, () => { const rb = filled(1024, 1024); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyTo 1024 -> Float64Array, wrapped', 0, () => { const rb = filled(1024, 1300); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    // On-heap data (32 B) and dst: window 0 materializes their `buffer` once.
+    ['copyTo 8 full wrapped, on-heap', 0, () => { const rb = filled(8, 13); const out = new Float32Array(8); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['copyToFast 1024, contiguous', 'report', HAS_FAST ? () => { const rb = filled(1024, 1024); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyToFast(out); }; } : null],
+    ['copyToFast 1024, wrapped', 'report', HAS_FAST ? () => { const rb = filled(1024, 1300); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyToFast(out); }; } : null],
     ['getOrDefault(i) no default', 'report', () => { const rb = filled(8, 13); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.getOrDefault(i & 7); }; }],
     // Controls: must allocate, or the counter is blind and the gate has no teeth.
     ['CONTROL subarray per op', 'view', () => { const rb = filled(32, 50); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.data.subarray(0, 4); }; }],
@@ -117,6 +145,8 @@ for (const [name, expect] of lanes) {
 const rows = [];
 let base = 0;
 for (const [name, expect, make] of lanes) {
+    // null make: the method is missing on an explicit (older) build -> 'n/a'.
+    if (make === null) { rows.push({ name, expect, net: NaN, first: NaN }); continue; }
     globalThis.gc();
     const { best, first } = measure(make());
     if (expect === null) base = best;
@@ -125,7 +155,7 @@ for (const [name, expect, make] of lanes) {
 }
 
 const pad = (s, w) => (s + ' '.repeat(w)).slice(0, w);
-const fmt = (x) => (Math.round(x * 10) / 10).toFixed(1);
+const fmt = (x) => (x === x ? (Math.round(x * 10) / 10).toFixed(1) : 'n/a');
 console.log('alloc: ' + process.version + ' ' + process.arch + ' execArgv=' + (process.execArgv.join(' ') || '-') +
     ' N=' + N + ' windows=' + WINDOWS + ' build=' + (target || 'RingBuffer.js'));
 console.log(pad('lane', 40) + pad('B/op', 10) + 'window0 B/op');

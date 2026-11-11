@@ -6,8 +6,8 @@
  *
  * Two jobs, kept separate (torture-harness skill):
  *   - @zakkster/lite-leak        -- retention. Phase 1 churns 4096 RingBuffers
- *     (push past capacity, getOrDefault, forEach, copyTo, reset, destroy on odd
- *     cycles); tracker.size() must drain to 0. A second tracker follows the
+ *     (push past capacity, getOrDefault, forEach, copyTo, copyToFast, reset,
+ *     destroy on odd cycles); tracker.size() must drain to 0. A second tracker follows the
  *     `data` arrays of 256 instances that stay ALIVE: after destroy() every one
  *     must be reclaimed (destroy really drops the backing store).
  *   - @zakkster/lite-gc-profiler -- budget. Phase 2 runs each hot lane in its
@@ -15,13 +15,19 @@
  *     gates every gated lane at major 0, minor 0, maxPauseMs 2.
  *
  * Teeth: the CONTROL lane allocates one subarray view per op and MUST read
- * minor >= 1, or the profiler is blind and the run fails. Two lanes are
- * REPORTED, never gated: copyTo of 1024 wrapped samples (the documented
- * set + subarray path, 2 views per call) and get(i) (boxes its result).
+ * minor >= 1, or the profiler is blind and the run fails. copyTo of 1024
+ * samples is GATED (COPY1024_HOT ops, one push per op so start walks all 1024
+ * positions: the head-0 case and both rotate branches run). Two lanes are
+ * REPORTED, never gated: copyToFast of 1024 wrapped samples (set + subarray,
+ * 2 views per call) and get(i) (boxes its result).
  * get(i) stays REPORTED, not a second CONTROL: its 16 B/op reads only a few
  * minors over HOT ops and can read 0 once V8 grows new space, which would be a
  * flake in a deterministic gate. Its 16 B teeth are gated deterministically by
  * test/alloc.mjs `CONTROL get(i), one 16 B box`.
+ *
+ * A build without copyToFast: the default target fails closed (exit 2); an
+ * explicit build path (revert / must-fail run on an older build) skips the
+ * copyToFast call in churn() and prints that lane as 'n/a'.
  *
  * res= on the GATE line is the minor-GC gate's resolution: the CONTROL lane's
  * alloc B/op divided by its minor count (= control bytes per minor / HOT ops).
@@ -29,15 +35,19 @@
  * minor 0, so "minor 0" proves less than res B/op, not 0 B/op. 'n/a' when the
  * control read minor 0 or the alloc counter is missing. It drifts upward when
  * V8 grows new space. Printed, never gated (test/alloc.mjs gates B/op).
+ * res assumes HOT ops; a lane of n ops resolves res x HOT / n, so the copyTo
+ * 1024 lane (COPY1024_HOT = HOT/16) proves only < 16 x res B/op;
+ * test/alloc.mjs gates it at < 1 B/op.
  *
  * Retention: churn() must leave exactly CYCLES instances tracked mid-run; a
  * tracker that missed any of them would make "live=0" prove less.
  *
  * alloc B/op on each lane is V8's total_allocated_bytes delta over the window /
  * ops (Node >= 24). One window carries a fixed 0.03-1 MB of tier-up and runtime
- * bytes that do not scale with ops, so the empty-loop BASELINE lane prints that
- * floor and the GATE line reports the worst gated lane NET of it. REPORTED only
- * here; test/alloc.mjs (min over windows) is the B/op gate.
+ * bytes that do not scale with ops, so the empty-loop BASELINE lane (HOT ops)
+ * prints that floor and the GATE line reports the worst gated lane NET of it,
+ * the floor rescaled to the lane's own op count (baseline B/op x HOT / n). REPORTED
+ * only here; test/alloc.mjs (min over windows) is the B/op gate.
  *
  * Exit: 0 ok, 1 a gate failed, 2 the harness cannot run (no --expose-gc, a
  * devDependency missing, an unusable target).
@@ -74,13 +84,18 @@ if (typeof RingBuffer !== 'function') {
     process.stderr.write('torture: ' + url + ' exports no RingBuffer\n');
     process.exit(2);
 }
+const HAS_FAST = typeof RingBuffer.prototype.copyToFast === 'function';
+if (!HAS_FAST && !target) {
+    process.stderr.write('torture: RingBuffer.js has no copyToFast (fail closed; pass an explicit build path for a revert run)\n');
+    process.exit(2);
+}
 
 const CYCLES = 4096;
 const HELD = 256;
 const HOT = 2_000_000;
 const CHUNK = 1000;         // ops per lane call: a hot path is called often, briefly
 const WARM = 300_000;       // warmup ops per lane, outside the window
-const REPORTED_HOT = HOT >> 4; // copyTo 1024 copies 1024 samples per op
+const COPY1024_HOT = HOT >> 4; // the 1024 lanes copy 1024 samples per op
 
 const HAS_ALLOC_COUNTER = 'total_allocated_bytes' in v8.getHeapStatistics();
 const allocated = () => (HAS_ALLOC_COUNTER ? v8.getHeapStatistics().total_allocated_bytes : NaN);
@@ -124,6 +139,7 @@ function churn() {
         SINK[0] += rb.getOrDefault(2048, -1);
         rb.forEach(feCb);
         SINK[0] += rb.copyTo(SCRATCH_1024, 0);
+        if (HAS_FAST) SINK[0] += rb.copyToFast(SCRATCH_1024, 0);
         rb.reset();
         if (i & 1) rb.destroy();
         // The cleanup and the tag capture nothing (held-value contract).
@@ -242,11 +258,18 @@ function laneControl(rb, n) {
     for (let i = 0; i < n; i++) KEEP[0] = rb.data.subarray(0, 4);
 }
 
+// A full capacity-1024 ring pushed once per op: start walks 0..1023, so the
+// head-0 copy and both rotate branches (start <= n/2, start > n/2) run.
 function laneCopy1024(rb, n) {
     for (let i = 0; i < n; i++) {
         rb.push(VALS[i & 15]);
         SINK[0] += rb.copyTo(SCRATCH_1024, 0);
     }
+}
+
+// No push: the ring stays wrapped (start 7), two views per call.
+function laneCopyFast1024(rb, n) {
+    for (let i = 0; i < n; i++) SINK[0] += rb.copyToFast(SCRATCH_1024, 0);
 }
 
 function laneGetBox(rb, n) {
@@ -262,10 +285,12 @@ const rbCopy = full(32);
 const rbReset = new RingBuffer(32);
 const rbCtl = full(32);
 const rbBig = full(1024);
+const rbFast = full(1024);
 const rbBox = full(1024);
 
 // kind: 'gated' (major 0, minor 0, maxPauseMs 2), 'control' (must read
-// minor >= 1), 'reported' (printed, never gated).
+// minor >= 1), 'reported' (printed, never gated). A null run: the method is
+// missing on an explicit (older) build; the row prints 'n/a'.
 const LANES = [
     ['BASELINE empty loop (alloc floor)', 'reported', HOT, (n) => laneEmpty(n)],
     ['push + tryPush, full ring', 'gated', HOT, (n) => lanePush(rbPush, n)],
@@ -275,7 +300,8 @@ const LANES = [
     ['copyTo 32 contig+wrapped F32+F64', 'gated', HOT, (n) => laneCopy32(rbCopy, n)],
     ['push x32 + reset, cap 32', 'gated', HOT, (n) => laneReset(rbReset, n)],
     ['CONTROL subarray view per op', 'control', HOT, (n) => laneControl(rbCtl, n)],
-    ['REPORTED copyTo 1024 wrapped (R1)', 'reported', REPORTED_HOT, (n) => laneCopy1024(rbBig, n)],
+    ['copyTo 1024 F32, start walks 0..1023', 'gated', COPY1024_HOT, (n) => laneCopy1024(rbBig, n)],
+    ['REPORTED copyToFast 1024 wrapped', 'reported', COPY1024_HOT, HAS_FAST ? (n) => laneCopyFast1024(rbFast, n) : null],
     ['REPORTED get(i)', 'reported', HOT, (n) => laneGetBox(rbBox, n)],
 ];
 const GATED_RULES = { maxMajor: 0, maxMinor: 0, maxPauseMs: 2 };
@@ -289,6 +315,14 @@ const GATED_RULES = { maxMajor: 0, maxMinor: 0, maxPauseMs: 2 };
 function drive(run, n) {
     for (let c = n / CHUNK; c > 0; c--) run(CHUNK);
 }
+// A mistyped kind would fall through to 'reported' and never gate.
+const KINDS = ['gated', 'control', 'reported'];
+for (const [name, kind] of LANES) {
+    if (!KINDS.includes(kind)) {
+        process.stderr.write('torture: lane "' + name + '" has unknown kind ' + String(kind) + '\n');
+        process.exit(2);
+    }
+}
 for (const [name, , n] of LANES) {
     if (n % CHUNK !== 0) {
         process.stderr.write('torture: lane "' + name + '" ops ' + n + ' not a multiple of ' + CHUNK + '\n');
@@ -298,6 +332,10 @@ for (const [name, , n] of LANES) {
 
 const rows = [];
 for (const [name, kind, n, run] of LANES) {
+    if (run === null) {
+        rows.push({ name, kind, n, ok: kind === 'reported', report: null, major: NaN, minor: NaN, maxMs: NaN, bop: NaN });
+        continue;
+    }
     drive(run, WARM);
     globalThis.gc();
     await sleep(25);
@@ -334,14 +372,16 @@ let gAlloc = -Infinity;
 const baseBop = rows[0].bop;
 let lanesOk = true;
 for (const r of rows) {
-    console.log(pad(r.name, 40) + pad(r.kind, 10) + pad(String(r.n), 9) + pad(String(r.major), 7) +
-        pad(String(r.minor), 7) + pad(r.maxMs.toFixed(2), 8) + pad(fmtB(r.bop), 12) +
-        (r.kind === 'reported' ? 'reported' : r.ok ? 'ok' : 'FAIL'));
+    const na = r.major !== r.major;
+    console.log(pad(r.name, 40) + pad(r.kind, 10) + pad(String(r.n), 9) + pad(na ? 'n/a' : String(r.major), 7) +
+        pad(na ? 'n/a' : String(r.minor), 7) + pad(na ? 'n/a' : r.maxMs.toFixed(2), 8) + pad(fmtB(r.bop), 12) +
+        (na ? 'n/a' : r.kind === 'reported' ? 'reported' : r.ok ? 'ok' : 'FAIL'));
     if (r.kind === 'gated') {
         gMajor += r.major;
         gMinor += r.minor;
         if (r.maxMs > gMaxMs) gMaxMs = r.maxMs;
-        if (!(r.bop - baseBop <= gAlloc)) gAlloc = r.bop - baseBop;
+        const net = r.bop - baseBop * HOT / r.n;
+        if (!(net <= gAlloc)) gAlloc = net;
     }
     if (!r.ok) lanesOk = false;
 }
@@ -366,6 +406,10 @@ console.log(
 if (!ok) {
     for (const r of rows) {
         if (r.ok) continue;
+        if (r.major !== r.major) {
+            console.error('  lane "' + r.name + '" not measured (method missing on this build)');
+            continue;
+        }
         if (r.kind === 'control') {
             console.error('  control "' + r.name + '" read minor=' + r.minor + ' (want >= 1): profiler is blind');
             continue;

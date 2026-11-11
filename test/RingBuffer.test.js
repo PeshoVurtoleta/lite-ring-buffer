@@ -332,33 +332,38 @@ describe('RingBuffer -- copyTo', () => {
         assert.deepStrictEqual(Array.from(i32), [3, 4, 5, 6]);
     });
 
-    // Up to 32 samples go through the scalar loop, more through set + subarray.
-    // A wrapped ring is always full (wrapping needs more pushes than slots), so
-    // wrapped copies are whole powers of two: 32 is the loop's largest, 64 the
-    // set path's smallest. The oracle is the pushed sequence itself, not get().
+    // A full ring copied into a Float32Array takes the rot path (one intrinsic
+    // set of the storage, then copyWithin + a scalar loop over the smaller ring
+    // half; nothing to rotate at start 0); every other copy, and every
+    // Float64Array copy, takes the masked scalar loop. `path` names the Float32
+    // copy. A wrapped ring is always full (wrapping needs more pushes than
+    // slots), so every wrapped case is rot: start <= n/2 at [64, 80] (start 16),
+    // start > n/2 at the others. The oracle is the pushed sequence itself, not
+    // get().
     const cases = [
         // [capacity, pushes, wrapped, path]
         [32, 1, false, 'loop'],
         [32, 31, false, 'loop'],
-        [32, 32, false, 'loop'],
-        [8, 13, true, 'loop'],
-        [32, 49, true, 'loop'],
-        [64, 33, false, 'set'],
-        [64, 64, false, 'set'],
-        [64, 97, true, 'set'],
-        [128, 100, false, 'set'],
-        [128, 200, true, 'set'],
+        [32, 32, false, 'rot'],
+        [8, 13, true, 'rot'],
+        [32, 49, true, 'rot'],
+        [64, 33, false, 'loop'],
+        [64, 64, false, 'rot'],
+        [64, 80, true, 'rot'],
+        [64, 97, true, 'rot'],
+        [128, 100, false, 'loop'],
+        [128, 200, true, 'rot'],
     ];
     for (const [cap, pushes, wrapped, path] of cases) {
         const n = Math.min(cap, pushes);
-        it(`copies ${n} samples ${wrapped ? 'across the wrap' : 'contiguously'} (${path} path, Float32 + Float64)`, () => {
+        it(`copies ${n} samples ${wrapped ? 'across the wrap' : 'contiguously'} (Float32 ${path} path + Float64 loop)`, () => {
             const rb = new RingBuffer(cap);
             const seq = [];
             for (let i = 1; i <= pushes; i++) { rb.push(i + 0.25); seq.push(i + 0.25); }
             const want = seq.slice(seq.length - n);
             assert.strictEqual(rb.count, n);
             assert.strictEqual(((rb.head - rb.count) & rb.mask) + rb.count > rb.capacity, wrapped);
-            assert.strictEqual(n <= 32, path === 'loop');
+            assert.strictEqual(n === cap, path === 'rot');
 
             const f32 = new Float32Array(n + 3).fill(-1);
             assert.strictEqual(rb.copyTo(f32, 2), n);
@@ -371,8 +376,9 @@ describe('RingBuffer -- copyTo', () => {
         });
     }
     // No-allocation is gated by test/alloc.mjs (npm run alloc). A heapUsed delta
-    // here cannot see it: scavenges absorb the views, and the old set path read
-    // 0.96 MB over 100k copies, under a 1 MB bound.
+    // here cannot see it: scavenges absorb the views, and the 1.2.1 set +
+    // subarray copy (now copyToFast) read 0.96 MB over 100k copies, under a
+    // 1 MB bound.
 });
 
 describe('RingBuffer -- iteration', () => {
