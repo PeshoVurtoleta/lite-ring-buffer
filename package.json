@@ -27,7 +27,8 @@
     "alloc": "node --expose-gc test/alloc.mjs",
     "torture": "node --expose-gc test/torture.mjs",
     "ascii": "node test/ascii.mjs",
-    "verify": "npm test && npm run alloc && npm run torture && npm run ascii"
+    "verify": "npm test && npm run alloc && npm run torture && npm run ascii",
+    "inline-diff": "node test/tools/inline-diff.mjs"
   },
   "keywords": [
     "ring-buffer",

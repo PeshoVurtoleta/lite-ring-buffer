@@ -10,6 +10,16 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+Tooling and docs only: no runtime change (`RingBuffer.js` and `RingBuffer.d.ts` untouched).
+
+### Tests
+
+- New `npm run inline-diff` (`test/tools/inline-diff.mjs`, REPORTED tier: not in `verify`, run by hand under the quiet lock before each release and in any unit that edits `RingBuffer.js`). It stages `git show HEAD:RingBuffer.js` (or `--before FILE` / `--before-ref REF`) and the working-tree file, plus three must-fail controls (copies whose `getOrDefault`, `peekNewest` or `peekOldest` is padded past V8's default 460-byte max-inlined-bytecode-size), and runs the vendored script with `--fn getOrDefault,peekNewest,peekOldest` on turbo and maglev. Exit 0 = A/A SAME and every control DIFF naming only its own function in every tier; 1 = A/A DIFF or a blind control; 2 = NO-VERDICT.
+- New `test/InliningTool.test.js` (31 tests, in `npm test`): vendored-script sha pin and its teeth, the script's `--self-test`, five script mutants that must go red plus a driver-exit mutant caught against real V8, and the `inline-diff.mjs` verdict / fail-closed rows against a stub script. A missing bash, git or node fails red; nothing skips.
+- `npm test` count 59 -> 90 (`test/RingBuffer.test.js` 59 + `test/InliningTool.test.js` 31; `EXPECTED` in `test/count.mjs`).
+- Vendored `test/tools/inlining-budget-diff.sh`: byte-identical copy of `@zakkster/lite-utils` (unpublished) commit 465881b, sha256 f13f33c2dfa8d5891313125d98d298260c019900989339bd751239c8eb9f19c1, 1530 lines. Never edited here; fixes go to LiteUtils.
+- Census 2026-11-11 ~01:02Z, Node v26.8.2 arm64, HEAD 27a8326, host QUIET at start (load1 2.72 vs baseline 2.21): 5 full runs of the pre-review inline-diff.mjs (e1e63ad8), all exit 0, ~7 s each; 1 run of the shipped 3fae616d, exit 0, host PRELIMINARY load1 3.78 (fix-run.log) (REPORTED).
+
 ## [1.2.1] - 2026-11-11
 
 Tooling and docs only: no runtime change. `RingBuffer.js` and `RingBuffer.d.ts` differ from 1.2.0 only in three comment characters.

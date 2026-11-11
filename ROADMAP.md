@@ -2,6 +2,8 @@
 
 Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote its laws.
 
+Statistical host: none yet: statistical claims are REPORTED only until R1 step 1 names its host (QUIET local window or the hosted-CI lane it describes).
+
 Baseline: 1.2.1 (prepared 2026-11-11: units D / D2 tooling + docs and LEDGER.md over 1.2.0, no runtime
 change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 and R2 are still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
 `pushBatch`.
@@ -72,6 +74,22 @@ baseline 2.21), Node v26.8.2; log .handoff/D2/qa/q7-verify.txt.
 - `test/ascii.mjs` (DONE): self-control flattened to flat module code.
 - FILLER: `count.mjs` passes no `run()` timeout: a never-settling test hangs the gate (plain `node --test`
   behaves the same); add a bounded timeout + a must-fail control.
+
+### LU -- inlining-budget gate (tooling + docs; no runtime change)
+
+STATUS 2026-11-11: done in the working tree (reviewer APPROVED B1 + B2; B3 docs; qa: see NEXT.md), awaiting the
+maintainer's commit. Spec and evidence: `.handoff/LU/` (gitignored). Adds `npm run inline-diff`
+(`test/tools/inline-diff.mjs`) over the vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b, pinned
+by sha256) and `test/InliningTool.test.js` (31 tests; `npm test` = 59 + 31 = 90). Details: LEDGER C10 / C11.
+Maintainer rulings (AskUserQuestion, 2026-11-11):
+- OQ-1 = (a) "REPORTED, by hand": `npm run inline-diff` outside verify; run under the quiet lock before each
+  /release and in every unit touching `RingBuffer.js` (R1 / R2 / R3); exit logged in that unit's evidence.
+- OQ-2 = (a) "Inside npm test": `test/InliningTool.test.js` in `test/count.mjs` FILES + EXPECTED.
+- OQ-3 = (a) "git show HEAD": default before = `git show HEAD:RingBuffer.js` staged to temp, named by commit + sha.
+- OQ-4 = (a) "Go red, fail closed": no bash -> `npm test` red.
+Follow-ups: the R1 / R2 / R3 coder batches run `npm run inline-diff` (exit in the unit's evidence). The R1 / R2 coder batch unparks
+deopt-diff (LEDGER A8: `--fn copyTo` plus `pushBatch`, HEAD vs candidate, Float32 / Float64 dst, REPORTED).
+Parked / refused here: deopt-diff (A8), allocation-diff (A9), alloc-per-op (A10).
 
 ### R1 -- copyTo allocates at the sizes the ecosystem actually uses (bug-grade)
 

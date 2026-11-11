@@ -8,13 +8,13 @@ gate the entry names.*
 Scope: `@zakkster/lite-ring-buffer` (RingBuffer, ceilPow2). Sources: `git log`, `CHANGELOG.md`,
 `ROADMAP.md`, `.handoff/HISTORY.md`, `.handoff/D/PLAN.md`, `.handoff/D2/PLAN.md` and the evidence
 dirs under them (all `.handoff/` is gitignored), the headers of `test/alloc.mjs`,
-`test/torture.mjs`, `test/count.mjs`, and the auto-memory note `alloc-gate-total-allocated-bytes`.
+`test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, and the auto-memory note `alloc-gate-total-allocated-bytes`.
 Numbers are copied from those sources as they state them; a number with no date / host / run
 count there carries none here either, and says so.
 
 Commits cited: 4dd231b (initial, 2026-06-30), 1a5a294 (1.1.0, 2026-10-08), e3e1df1 (audit fixes +
 alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-10), b6a8310
-(unit D2, 2026-11-10). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
+(unit D2, 2026-11-10), 27a8326 (1.2.1, HEAD of unit LU, 2026-11-11; LU is uncommitted). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
 1d6e368 only to drop a trailer (trees identical, `git diff c2c28e0 1d6e368` empty). Not a conflict.
 
 ## How to read this file
@@ -30,7 +30,8 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 - `.handoff/` is gitignored: those paths exist only in the maintainer's main checkout.
 - Tiers: DETERMINISTIC gates run in `npm test` / `npm run verify` every time; STATISTICAL gates run
   once per release on a quiet host; REPORTED numbers gate nothing. This package has no STATISTICAL
-  gate yet (the R1 timed A/B is PENDING).
+  gate yet (the R1 timed A/B is PENDING). `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
+  the quiet lock, outside `verify`; only its deterministic tool tests are in `npm test`.
 
 ## How to add an entry
 
@@ -48,13 +49,13 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
-   `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, B1, C1, C2, C3, C5, C6, C7,
-   C8)*
+   `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
+   C8, C10, C11)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once. *(B1, C1, C2, C3, C6, C8)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, C1, C2, C3, C6, C8, C10, C11)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
-   the per-op byte gate is `test/alloc.mjs`. *(A6, C4, D3, D4)*
+   the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
    lane must run in optimized code. *(B2, C8, D1, D2, D3)*
@@ -73,10 +74,10 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 10. **NaN is data here; null is not zero.** `push(NaN)` is stored and read back so a telemetry gap
     reaches lite-stats-math; a bad `dst` throws, a NaN bound never passes. *(A5, B1)*
 11. **A test-count floor is part of `npm test`.** An emptied, skipped, crashed or early-exiting test
-    file must fail the run. *(C5, C6)*
+    file must fail the run. *(C5, C6, C10)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
-    copies under `.handoff/`. *(D5)*
-13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A7)*
+    copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11)*
+13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A10)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
 ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
@@ -174,6 +175,37 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 13.
 - **Gate.** None.
 
+### A8. deopt-diff PARKED (unit LU)
+
+- **What happened.** The LiteUtils tool family offers a deopt-diff (before / after deoptimization
+  comparison). Parked in unit LU (2026-11-11).
+- **Root cause.** No before / after pair exists before R1, and an A/A run gates no doc claim; R1's open
+  question is timing, not deopts.
+- **Evidence.** LiteUtils 465881b; `.handoff/LU/PLAN.md` (PLAN.md SPEC, PARK / REFUSE).
+- **Law.** 13.
+- **Gate.** None. Unpark in the R1 / R2 coder batch: `--fn copyTo` (plus `pushBatch`), HEAD vs candidate,
+  Float32 and Float64 dst, REPORTED tier.
+
+### A9. allocation-diff REFUSED (unit LU)
+
+- **What happened.** Considered as a second allocation oracle; refused 2026-11-11.
+- **Root cause.** It counts young-GC events under a 1 MB semispace, so it resolves only "less than 1 MB
+  per window" (law 3), and duplicates torture's GC counts. `test/alloc.mjs` is the per-op byte gate.
+- **Evidence.** LiteUtils 465881b; `.handoff/LU/PLAN.md`.
+- **Law.** 3, 13.
+- **Gate.** None (absence). Unpark: a supported Node without `total_allocated_bytes`, where `alloc.mjs`
+  exits 2.
+
+### A10. alloc-per-op.mjs REFUSED (unit LU)
+
+- **What happened.** Considered as a vendored per-op allocation tool; refused 2026-11-11.
+- **Root cause.** Same method as `test/alloc.mjs` (`total_allocated_bytes`, minimum over windows), REPORTED
+  tier, and untracked in LiteUtils, so there is nothing to pin.
+- **Evidence.** LiteUtils 465881b; `.handoff/LU/PLAN.md`.
+- **Law.** 1, 13.
+- **Gate.** None (absence). Unpark: LiteUtils commits it AND `alloc.mjs` shows a measured cross-lane
+  artifact.
+
 ---
 
 ## B. Defects found and fixed
@@ -194,7 +226,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `.handoff/HISTORY.md` 2026-10-14 audit burst (3 of the new tests fail on 1.1.0, by design;
   TA_LENGTH-drop mutant fails a gate).
 - **Law.** 1, 2, 10.
-- **Gate.** `test/RingBuffer.test.js` copyTo cases (counted by `test/count.mjs`, 59).
+- **Gate.** `test/RingBuffer.test.js` copyTo cases (59 of count.mjs's 90).
 
 ### B2. `getOrDefault` boxed every non-integer sample
 
@@ -397,6 +429,50 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   "host PRELIMINARY (load1 3.63, baseline 2.21, 12 cores ...)"). The REJECT: `.handoff/reviews/2026-11-10-findings.md` (D2 B2 reviewer: the only D2 verify, 07:24Z, hit a BUSY lock, ran unlocked at load1 31.53 and predated the count.mjs fix; line set to PENDING until qa's 07:50Z locked run).
 - **Law.** 5, 6.
 - **Gate.** Reviewer doc-truth check; no automation.
+
+### C10. The inlining by-hand release check: `npm run inline-diff` and its tool tests (unit LU)
+
+- **What happened.** The zero-allocation numbers need V8 to inline the call (B2), but nothing checked
+  that a change to `RingBuffer.js` kept it inlinable. Unit LU vendored `test/tools/inlining-budget-diff.sh`
+  (byte-identical to unpublished `@zakkster/lite-utils` commit 465881b, sha256 f13f33c2..., 1530 lines;
+  pinned by sha in `test/InliningTool.test.js`; never edited here) and wrote `test/tools/inline-diff.mjs`.
+  It stages before = `git show HEAD:RingBuffer.js`, after = the working-tree file, and three must-fail
+  controls (copies of after whose `getOrDefault`, `peekNewest` or `peekOldest` is padded with a never-taken
+  branch past V8's default 460-byte max-inlined-bytecode-size; bytecode 66 -> 724, 39 -> 697, 44 -> 702 on Node v26.8.2 (`.handoff/LU/evidence/bytecode.log`)),
+  then runs the script with `--fn getOrDefault,peekNewest,peekOldest` on turbo and maglev. Exit 0 = A/A SAME
+  and every control DIFF naming only its own function in every tier; 1 = A/A DIFF or a blind control; 2 =
+  NO-VERDICT.
+- **Root cause.** An inlining regression is invisible to the correctness suite, and a diff tool that has never
+  been shown a DIFF cannot be trusted to report one.
+- **Evidence.** `.handoff/LU/evidence/census.log` (2026-11-11 ~01:02Z, Node v26.8.2 arm64, HEAD 27a8326,
+  host QUIET at start, load1 2.72 vs baseline 2.21, tool e1e63ad8: 5 full runs exit 0, A/A SAME 5/5, each
+  control DIFF 5/5 on its own fn, ~7 s per run; REPORTED; and 1 run of the shipped tool 3fae616d, exit 0,
+  host PRELIMINARY load1 3.78, `.handoff/LU/evidence/fix-run.log`; REPORTED). Cross-oracle: on the getOrDefault control `node --expose-gc test/alloc.mjs <control>` reads
+  `getOrDefault(i, 0)` 16.0 B/op and exits 1. `.handoff/LU/PLAN.md` OQ-1..4 rulings.
+- **Law.** 1, 2, 11.
+- **Gate.** Tier (ruling OQ-1): REPORTED, by hand under the quiet lock before each /release and in every
+  unit touching `RingBuffer.js`; not in `verify`. Deterministic part, in `npm test` (90 = 59 + 31): the sha
+  pin and its teeth, the script's `--self-test` (89 checks), five script mutants red (sort -u, elif false,
+  guard off, kConcurrent c=0, always SAME), and 14 MUST-COVER `inline-diff.mjs` rows (1-13 plus 8b; the run rows against a stub script, 6 and 12 by `--stage-only` on the real tree);
+  a missing bash / git / node fails red (OQ-4), no skip, no real A/A verdict there (OQ-1). Open FILLER
+  (LiteUtils): script mutant m4 (null-control cmp off) survives every deterministic row.
+
+### C11. Review-caught teeth defects in the inlining gate (unit LU)
+
+- **What happened.** (1) B1 review: a padded control that DIFFed on only one tier passed (`found.some`);
+  fixed to require every tier. A missing tier diff file read exit 1 instead of 2; now NO-VERDICT.
+  (2) B2: a full real-V8 verdict row had been put inside `npm test` against ruling OQ-1 (brief error,
+  removed before review); the tmp-leak row compared a whole-host tmpdir listing (a law 12 instance: now
+  a scoped TMPDIR); the hang row depended on host speed (now a first-call hang plus a 3 s cap). (3) B2
+  review: the driver-exit row's regex also matched the echo mutant m6 (die -> echo); anchored to die()'s
+  prefix, so m6 is caught by the real-V8 driver-exit row.
+- **Root cause.** An any-of check where the contract was all-of; a missing output mapped to the wrong exit;
+  a whole-host listing as a scope; a timing-dependent row; a regex looser than the failure it names.
+- **Evidence.** `.handoff/LU/review-b1.md`, `.handoff/LU/review-b2.md`, `.handoff/LU/evidence/b2-m6-bothways.log`,
+  `.handoff/LU/evidence/failclosed.log`.
+- **Law.** 1, 2, 12.
+- **Gate.** `test/InliningTool.test.js` (every-tier control row, missing-tier-file row, scoped-TMPDIR
+  row, first-call hang row, anchored driver-exit row).
 
 ---
 
