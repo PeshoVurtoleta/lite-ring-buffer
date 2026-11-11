@@ -2,8 +2,8 @@
 
 Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote its laws.
 
-Baseline: `main` is 1.2.0 (`0412025`; it shipped the `e3e1df1` audit fixes and the alloc gate). R1 and R2 are
-still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
+Baseline: 1.2.1 (prepared 2026-11-11: units D / D2 tooling + docs and LEDGER.md over 1.2.0, no runtime
+change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 and R2 are still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
 `pushBatch`.
 
 Scope trimmed 2026-11-10 (maintainer). lite-o1 `RingLog` / `RingDeque` do NOT supersede this package (see

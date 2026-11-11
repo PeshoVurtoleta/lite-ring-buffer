@@ -10,6 +10,10 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-11
+
+Tooling and docs only: no runtime change. `RingBuffer.js` and `RingBuffer.d.ts` differ from 1.2.0 only in three comment characters.
+
 ### Tests
 
 - `npm test` = `node test/count.mjs`: runs `test/RingBuffer.test.js` through `node:test` `run()` under `--expose-gc` and is count-gated (exactly 59 tests pass, 0 fail, 0 skipped or todo; an empty, skipped, crashed or early-exiting file fails). `--test-name-pattern` passthrough is lost (extra args are read as test files). The 1M-push heap smoke test fails, not skips, when gc is not exposed. The test file moved from the package root to `test/`.
