@@ -28,7 +28,8 @@
     "torture": "node --expose-gc test/torture.mjs",
     "ascii": "node test/ascii.mjs",
     "verify": "npm test && npm run alloc && npm run torture && npm run ascii",
-    "inline-diff": "node test/tools/inline-diff.mjs"
+    "inline-diff": "node test/tools/inline-diff.mjs",
+    "bench:copyto": "node test/bench/copyto-ab.mjs"
   },
   "keywords": [
     "ring-buffer",
