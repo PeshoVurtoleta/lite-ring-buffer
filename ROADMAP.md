@@ -2,7 +2,7 @@
 
 Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote its laws.
 
-Statistical host: none yet: statistical claims are REPORTED only until R1 step 1 names its host (QUIET local window or the hosted-CI lane it describes).
+Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
 Baseline: 1.2.1 (prepared 2026-11-11: units D / D2 tooling + docs and LEDGER.md over 1.2.0, no runtime
 change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 and R2 are still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
@@ -120,6 +120,13 @@ a JS loop. Plan:
 
 Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, expected 0 if option (a) or (b) covers that
 size.
+
+STATUS 2026-11-11: step 1 DONE as a research pass (`.handoff/research/r1/`, PRELIMINARY; its strict hold of
+the deciding rungs is PENDING). Ruled (`.handoff/PROPOSAL-r1.md`): Q-R1 = (c) zero allocation at every size
+(full ring + Float32Array dst: `dst.set(data, off)` + `copyWithin` + a loop over the smaller half; else the
+masked loop); Q-R1-SURFACE = a separate allocating `copyToFast(dst, dstOffset)`; Q-R1-ALIAS = fail closed on a
+`dst` sharing `data`'s buffer (intrinsic `buffer` getter, RangeError); Q-STATHOST = local QUIET, strict.
+Next: the R1 build unit (planner pass on the PROPOSAL).
 
 ### R2 -- `pushBatch(src, srcOffset = 0, count = src.length - srcOffset)`
 

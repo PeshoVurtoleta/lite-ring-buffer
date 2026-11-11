@@ -8,7 +8,8 @@ gate the entry names.*
 Scope: `@zakkster/lite-ring-buffer` (RingBuffer, ceilPow2). Sources: `git log`, `CHANGELOG.md`,
 `ROADMAP.md`, `.handoff/HISTORY.md`, `.handoff/D/PLAN.md`, `.handoff/D2/PLAN.md` and the evidence
 dirs under them (all `.handoff/` is gitignored), the headers of `test/alloc.mjs`,
-`test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, and the auto-memory note `alloc-gate-total-allocated-bytes`.
+`test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, `.handoff/research/r1/` and
+`.handoff/PROPOSAL-r1.md` (R1 step 1), and the auto-memory note `alloc-gate-total-allocated-bytes`.
 Numbers are copied from those sources as they state them; a number with no date / host / run
 count there carries none here either, and says so.
 
@@ -30,7 +31,7 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 - `.handoff/` is gitignored: those paths exist only in the maintainer's main checkout.
 - Tiers: DETERMINISTIC gates run in `npm test` / `npm run verify` every time; STATISTICAL gates run
   once per release on a quiet host; REPORTED numbers gate nothing. This package has no STATISTICAL
-  gate yet (the R1 timed A/B is PENDING). `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
+  gate yet: its host is ruled (local QUIET, strict; R1 step 1), the gate arrives with the R1 build unit. `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
   the quiet lock, outside `verify`; only its deterministic tool tests are in `npm test`.
 
 ## How to add an entry
@@ -206,6 +207,20 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** None (absence). Unpark: LiteUtils commits it AND `alloc.mjs` shows a measured cross-lane
   artifact.
 
+
+### A11. copyTo strategies (a) loop-at-every-size and (b) loop-to-crossover REFUSED (R1 step 1)
+
+- **What happened.** The R1 step 1 research pass (2026-11-11) timed the masked loop, set + subarray and a
+  new zero-allocation full-ring candidate (ROT) at 32..16384 samples. Maintainer ruled (c) ROT + loop.
+  Refused: (a) the loop at every size -- 4.7x-6.3x of the set path at 1024 / Float32, ~12x at 16384; (b) the
+  loop up to the measured crossover (Float32: 64..256) -- both companions (1024) would keep allocating.
+- **Root cause.** A JS loop runs at ~0.45 ns per sample vs memcpy; only a view-free `set` (whole storage)
+  plus `copyWithin` keeps memcpy speed without allocating.
+- **Evidence.** `.handoff/PROPOSAL-r1.md` (RULINGS), `.handoff/research/r1/PROGRESS.md`; numbers PRELIMINARY
+  (strict hold PENDING).
+- **Law.** 5, 7, 13.
+- **Gate.** None (refusal). Reopen (a) only if (c) fails its alloc lanes or the inline-diff / deopt-diff
+  check in the R1 build unit; reopen (b) never for the companions' sizes.
 ---
 
 ## B. Defects found and fixed
@@ -274,7 +289,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Evidence.** e3e1df1 / 0412025; `CHANGELOG.md` [1.2.0] Changed; `.handoff/HISTORY.md` 2026-10-14
   release burst: `copyTo 33 contig 103.8 B/op`, `copyTo 64 wrapped 207.9 B/op` (Node 26.8.2 arm64,
   load average 4.11, one run); ROADMAP.md R1 (the "10-20 MB/s at fleet scale" line there is NOMINAL
-  arithmetic, not a measurement). The scalar-loop-vs-`set` timing is PENDING (no quiet window ran).
+  arithmetic, not a measurement). The scalar-loop-vs-`set` timing ran in the R1 step 1 research pass
+  (2026-11-11, `.handoff/research/r1/`, PRELIMINARY until its strict hold): at 32 samples the loop is
+  1.7x-3.9x faster than set + subarray (QUIET non-strict lock run, 3 compilations x 21 rounds, Node v26.8.2,
+  Apple M4 Pro, load1 1.70 -> 1.64), so 32 was not too high; the Float32 crossover is 64..256 and at 1024 the
+  loop costs 4.7x-6.3x. Options and rulings: `.handoff/PROPOSAL-r1.md`.
 - **Law.** 5, 7.
 - **Gate.** `test/alloc.mjs` lanes `copyTo 32, contiguous`, `copyTo 32, wrapped` and
   `copyTo 32 -> Float64Array, wrapped` (gated, < 1 B/op). The `copyTo 33` / `copyTo 64` set-path
@@ -537,3 +556,39 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Evidence.** 1d6e368; `.handoff/D/vitest-baseline.json` (`cmd`, `numTotalTests`).
 - **Law.** 12.
 - **Gate.** `npm test` names its files explicitly (`test/count.mjs` `FILES`).
+
+### D6. A short-window B/op lane read noise as allocation (R1 step 1 probe, four harness revisions)
+
+- **What happened.** The R1 step 1 research probe (2026-11-11) measured B/op per copyTo-shaped call
+  at 32..16384 samples with `total_allocated_bytes`. At large n a window holds few calls, and four
+  successive traps each read counter noise as allocation or hid real allocation: v1 took the minimum
+  of per-window DIFFERENCES over as few as 2,800 calls -> SET's known 104 B read 93 B (rungs 4096 /
+  16384 VOID); v2 ran each lane's windows back to back -> one ~200 ms background event read a loop
+  lane at 12.49 B/op in one of 3 compilations (not reproduced in 8 re-runs); a v3 draft without gc()
+  accounted SET's GC work in the NEXT lane's window (+1.23 B/op) and, with gc() only at window start,
+  missed the bytes in the open allocation area (SET 196.6 of 208 B); v3 on a contended host read four
+  loop lanes at ~9 B/op, consistent with a background allocation rate (~1.2 MB/s, inferred, not measured
+  directly) that scales with window wall time while the empty-driver window lasted microseconds. v4: min of each lane separately, gc() around every
+  window, windows interleaved across lanes, the empty window time-matched to its lane.
+- **Root cause.** Absolute counter noise (tens to hundreds of KB per window) divided by a small call
+  count; an empty baseline that is not matched to the lane in time or in GC state.
+- **Evidence.** `.handoff/research/r1/PROGRESS.md` (v1..v4 sections), `runs/v1/`, `runs/v2/`,
+  `runs/rung-*-v3.*`, harness copies per version; Node v26.8.2 / V8 14.6.202.34-node.28, Apple M4
+  Pro, 2026-11-11 05:33Z-05:48Z, hosts as each run states (QUIET to PRELIMINARY).
+- **Law.** 3, 4. A probe's B/op lane at >= 20,000 calls per window classifies objects per call (loops
+  < 8 B = no 16 B box; SET >= 52 / >= 156 B = one / two 104 B views); "< 1 B/op" is proven only by
+  `test/alloc.mjs` at N = 1,000,000.
+- **Gate.** None in the repo (research harness). The R1 build unit's `test/alloc.mjs` copyTo 1024
+  lanes hold the < 1 B/op claim.
+
+### D7. A single-layout oracle missed a whole branch (R1 step 1 probe)
+
+- **What happened.** The probe's oracle compared each candidate with HEAD `copyTo` on the timed
+  layouts only (head 0 and head n/2). A mutant in the ROT candidate's `start > capacity / 2` branch
+  passed it; an exhaustive sweep (every head x counts {cap, cap-1, cap/2+1, 33, 1} x capacities 8 /
+  64 / min(n, 1024)) fails it.
+- **Root cause.** The timed layouts are chosen for speed questions; head n/2 is the tie point between
+  ROT's two branches and never enters the second.
+- **Evidence.** `.handoff/research/r1/runs/controls/mut-rot-else.txt` (oracle true, sweep false).
+- **Law.** 1.
+- **Gate.** The R1 build unit's oracle is the sweep (PROPOSAL-r1 section 6), not the timed layouts.
