@@ -138,6 +138,11 @@ maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C1
 
 ### R2 -- `pushBatch(src, srcOffset = 0, count = src.length - srcOffset)`
 
+RULED 2026-11-12 (research pass, `.handoff/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
+this sketch where they differ -- count > capacity keeps physical n x push parity (head = (head + count) & mask, not
+head = 0); src is Float32Array / Float64Array only (other TypedArrays, BigInt included, TypeError); `set` only for a
+whole Float32 src; src sharing the ring's buffer -> RangeError. Next: R2 build unit, planner input = PROPOSAL-r2.
+
 Real gap: AudioWorklet blocks (128 frames), WebSocket chunks and physics sub-steps arrive as slices. lite-o1
 `RingLog` has no bulk push either.
 - Do not use `data.set(src.subarray(...))`: it allocates a 104 B view per call, which breaks zero-GC on the

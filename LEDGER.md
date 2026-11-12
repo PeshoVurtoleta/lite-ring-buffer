@@ -79,7 +79,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
     file must fail the run. *(C5, C6, C10)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
     copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11)*
-13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A12)*
+13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A13)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
 ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
@@ -248,6 +248,35 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   Held today by `test/copyto-r1b.test.js` A1a / A1b (B7).
 - **RULING.** Q-R1B-FIX = "V-split32c" (identity-keyed cache, key written after the read), maintainer,
   2026-11-11, AskUserQuestion (`.handoff/PROPOSAL-r1b.md` RULINGS); V-onebuf was not chosen.
+
+### A13. pushBatch bodies refused by the R2 research pass: one shared loop, Float64 `set`, two spans, inline families
+
+- **What happened.** The R2 research pass (2026-11-12, `.handoff/research/r2/`, build a6d0220 / eaa32ee7) compared
+  pushBatch bodies against a caller's `push` loop. Refused: (1) one masked loop shared by every src kind (MASK):
+  0 B monomorphic, but its src LOAD site boxes every sample once it has seen > 4 src classes (2042 B per 128-sample
+  call), and ONE `pushBatch(BigInt64Array)` call -- which throws TypeError and writes nothing -- leaves it boxing
+  every later non-Smi Float32 / Float64 sample (0 -> 1836-1839 B per 128-sample call); (2) `set` from a Float64 src: slower than the
+  masked loop (0.68-0.91x vs 0.38-0.48x of a push loop, chunks 32..256); (3) two unmasked spans (SPAN2): 0.95-1.24x
+  of the masked loop, the R1 LOOP2 null again; (4) per-family loops inline (FULL): 0 B under both traps but 658 B of
+  bytecode, over the 460 B inline limit (D9). Kept as the candidate: SPLIT v2 (346 B hot body + 234 B batchCheck,
+  per-family loop helpers, BigInt rejected before any store site, `set` for a whole Float32 src only). SPLIT v2 is
+  0 B for Float32 / Float64 src only: its shared "every other kind" site boxes non-Smi samples past 4 kinds
+  (review scratch run, 2065 B per 128-sample call).
+- **Root cause.** A keyed load / store site has a 4-map polymorphism budget and a megamorphic or generic site
+  passes doubles tagged, so it boxes (B8, now on the load side); a store site that once saw a BigInt goes generic
+  even though the store threw. `TypedArray.prototype.set` converting float64 -> float32 is slower than TurboFan's
+  per-element loop (inferred from timings, not from V8 source).
+- **Evidence.** `.handoff/research/r2/PROGRESS.md` rung 0 (`runs/rung0-check.json`, `rung0-check-v2.json`;
+  untimed, counter-based, D6 v4 harness), rungs 1-2 (`runs/rung1.md` QUIET non-strict exit 2, `runs/rung2.md`
+  PRELIMINARY exit 1 with n = 1024 VOID; 2026-11-12T08:09Z-08:15Z, Apple M4 Pro, Node v26.8.2 / V8
+  14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY); `.handoff/PROPOSAL-r2.md` section 4.
+- **Law.** 1, 4, 7 (and zero-box): a doc claim that pushBatch allocates nothing covers the > 4-class and the
+  after-a-BigInt-call paths.
+- **Gate.** None yet (research). The R2 build unit adds alloc lanes for both traps, each with a must-allocate
+  MASK-shaped control (PROPOSAL-r2 section 5). Reopen (1) / (4) only with a body that clears those lanes and
+  stays under 460 B; (2) only with a strict A/B where Float64 `set` beats the loop; (3) only with a new mechanism
+  (FILLER 2 / A7 rule).
+- **RULING.** Q-R2-PARITY = "A Physical parity"; Q-R2-ALIAS = "A RangeError, read every call"; Q-R2-TYPES = "B Float32/Float64 only"; Q-R2-BIGINT = "A TypeError up front"; Q-R2-SMALL = "A Document it"; Q-R2-STRICT = "A Rule now, strict in build". Maintainer, 2026-11-12, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r2.md` section 7).
 
 ---
 
@@ -817,3 +846,18 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (REPORTED).
 - **RULING.** Q-R1B-FIX = "V-split32c"; Q-R1B-ROUTER = "Loop at <= 32" (amends Q-R1 "`COPY_LOOP_MAX` goes",
   A11); maintainer, 2026-11-11, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r1b.md` RULINGS).
+
+### D11. Identical-source `new Function` probe columns share one feedback vector (R2 research)
+
+- **What happened.** The R2 probe builds each column from source text with `new Function`. Its rung-0 sweep fed the
+  MASK column a BigInt src; the later "fresh" B/op lane built a new MASK closure from the same text and read 1839 B
+  per call on Float32 src -- the sweep's pollution, not the lane's own behaviour. A per-column nonce comment in the
+  source (different text -> different cache entry) gave every lane fresh feedback and 0 B.
+- **Root cause.** V8's compilation (eval) cache returns the same SharedFunctionInfo and, with it, shared feedback for
+  identical source text, so separately built closures are one IC history. R1's probe relied on this for its A/A
+  twin (a timing-position A/A, not a second compilation) -- the same mechanism, harmless there.
+- **Evidence.** `.handoff/research/r2/probe-pushbatch.mjs` (`mkCol(..., fresh)`, `NONCE`); first-run vs fixed
+  `runs/rung0-check.json` described in `PROGRESS.md` rung 0 (2026-11-12, Node v26.8.2).
+- **Law.** 4 (a lane must run in the state it claims), 12 (scope every measurement).
+- **Gate.** None (research harness). A probe lane that claims fresh / monomorphic feedback builds its columns from
+  unique source text (or separate modules); a lane that wants shared feedback says so.
