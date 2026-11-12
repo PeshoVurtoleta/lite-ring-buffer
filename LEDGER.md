@@ -15,7 +15,8 @@ count there carries none here either, and says so.
 
 Commits cited: 4dd231b (initial, 2026-06-30), 1a5a294 (1.1.0, 2026-10-08), e3e1df1 (audit fixes +
 alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-10), b6a8310
-(unit D2, 2026-11-10), 27a8326 (1.2.1, 2026-11-11), dc6965f (unit LU, 2026-11-11), 132d003 (R1 step 1 rulings, 2026-11-11). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
+(unit D2, 2026-11-10), 27a8326 (1.2.1, 2026-11-11), dc6965f (unit LU, 2026-11-11), 132d003 (R1 step 1 rulings, 2026-11-11), 99e8749 (R1 build, 2026-11-11), 5ae2266 (bench:copyto, 2026-11-11);
+the R1b fix is in the working tree (uncommitted). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
 1d6e368 only to drop a trailer (trees identical, `git diff c2c28e0 1d6e368` empty). Not a conflict.
 
 ## How to read this file
@@ -24,14 +25,14 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 - Entries are IDs, not a single running number: `A<n>` refused / parked designs, `B<n>` defects
   found and fixed, `C<n>` gate evolution (gates that had to be given teeth), `D<n>` measurement
   traps. Within a section, entries are in rough chronological order. "Unit D" and "unit D2" mean
-  the ROADMAP units of those names; `D1`..`D7` are entries in section D of this file.
+  the ROADMAP units of those names; `D1`..`D10` are entries in section D of this file.
 - Every entry has: what happened, root cause, evidence (commit sha from `git log` plus a file or
   `.handoff` path), the law it produced, and the gate that now holds it (file name + test / lane
   name). A claim with no findable sha or path says `evidence: NOT FOUND` (none remain).
 - `.handoff/` is gitignored: those paths exist only in the maintainer's main checkout.
 - Tiers: DETERMINISTIC gates run in `npm test` / `npm run verify` every time; STATISTICAL gates run
   once per release on a quiet host; REPORTED numbers gate nothing. This package has no STATISTICAL
-  gate yet: its host is ruled (local QUIET, strict; R1 step 1), the gate arrives with the R1 build unit. `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
+  gate in `npm test` / `verify`: its host is ruled (local QUIET, strict; R1 step 1) and the copyTo A/B is the dev-only `npm run bench:copyto` (5ae2266), run by hand under `quiet-lock run --strict`. `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
   the quiet lock, outside `verify`; only its deterministic tool tests are in `npm test`.
 
 ## How to add an entry
@@ -65,8 +66,8 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim about allocation is a claim about every caller path.** "Zero allocation" holds only
-   for the paths the gate lanes cover; `copyTo` above 32 samples and `get(i)` allocate and the docs
-   say so. *(A1, A11, B2, B4, B5, B6)*
+   for the paths the gate lanes cover; `get(i)` allocates and the docs say so (`copyTo` no longer
+   allocates at any size since R1, B4); `copyToFast` allocates by design. *(A1, A11, B2, B4, B5, B6)*
 8. **General O(1) structures belong to lite-o1; this package is the Float32 telemetry ring** that
    feeds lite-canvas-graph and lite-stats-math. A feature that does not serve that pipeline is
    refused. *(A1, A2, A3, A4, A5)*
@@ -78,7 +79,7 @@ alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-1
     file must fail the run. *(C5, C6, C10)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
     copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11)*
-13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A11)*
+13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A12)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
 ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
@@ -184,8 +185,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   question is timing, not deopts.
 - **Evidence.** LiteUtils 465881b; `.handoff/LU/PLAN.md` (PLAN.md SPEC, PARK / REFUSE).
 - **Law.** 13.
-- **Gate.** None. Unpark in the R1 / R2 coder batch: `--fn copyTo` (plus `pushBatch`), HEAD vs candidate,
-  Float32 and Float64 dst, REPORTED tier.
+- **Gate.** None. UNPARKED in the R1 build burst (T7, REPORTED tier, decides nothing): the deopt-diff self-test
+  (107 ok) and `--fn copyTo` on Float32 and Float64 dst, 1.2.1 vs the R1 candidate (eab8983a), each DIFF = 1.2.1's one
+  Maglev deopt (`Math.min`) gone, R1 0 deopts, blind control DIFF (not blind). The drivers (`.handoff/R1/deopt/`)
+  were not reviewed; summary `.handoff/R1/evidence/S/t6-t7-summary.md` (HISTORY, R1 build burst 2). A11 stays closed.
+  Still not in `verify`; `pushBatch` has no candidate yet.
 
 ### A9. allocation-diff REFUSED (unit LU)
 
@@ -213,10 +217,37 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   new zero-allocation full-ring candidate (ROT) at 32..16384 samples. Maintainer ruled (c) ROT + loop.
   Refused: (a) the loop at every size -- 4.7x-6.3x of the set path at 1024 / Float32, ~12x at 16384; (b) the
   loop up to the measured crossover (Float32: 64..256) -- both companions (1024) would keep allocating.
-- **Root cause.** At 1024 / Float32 the masked loop takes ~457 ns per call vs 73-99 ns for set + subarray; only a view-free `set` (whole storage) plus `copyWithin` moves the bulk without allocating, and ROT still loops over the smaller half (0.71x-3.15x of today's call, PROPOSAL F4).
-- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/PROPOSAL-r1.md` (RULINGS, section 2), `.handoff/research/r1/PROGRESS.md`; 4.7x-6.3x from `runs/v2/rung-1024-v2.md` (2026-11-11T05:38Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 1.55 -> 1.56, QUIET non-strict, 3 compilations x 21 rounds); ~12x from `runs/rung-16384-v3.md` (wrap row only, host PRELIMINARY, load1 3.07 -> 3.15, run exit 1). All PRELIMINARY (strict hold PENDING).
+  AMENDED by Q-R1B-ROUTER (R1b, 2026-11-11, A12 / D10): Q-R1's "`COPY_LOOP_MAX` goes" was reversed for ONE
+  purpose -- a full Float32 ring of <= 32 samples takes the masked loop, ROT only above 32 (the cutoff 32 is
+  nominal). This is NOT (b): the loop is not carried up to the crossover, so (b) stays refused.
+- **Root cause.** At 1024 / Float32 the masked loop takes ~457 ns per call vs 73-99 ns for set + subarray;
+  only a view-free `set` (whole storage) plus `copyWithin` moves the bulk without allocating, and ROT still
+  loops over the smaller half (0.71x-3.15x of today's call, PROPOSAL F4).
+- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/PROPOSAL-r1.md` (RULINGS, section 2),
+  `.handoff/research/r1/PROGRESS.md`; `.handoff/PROPOSAL-r1b.md` RULINGS (Q-R1B-ROUTER). 4.7x-6.3x from
+  `runs/v2/rung-1024-v2.md` (2026-11-11T05:38Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1
+  1.55 -> 1.56, QUIET non-strict, 3 compilations x 21 rounds); ~12x from `runs/rung-16384-v3.md` (wrap row
+  only, host PRELIMINARY, load1 3.07 -> 3.15, run exit 1). All PRELIMINARY (strict hold PENDING).
 - **Law.** 5, 7, 13.
-- **Gate.** None (refusal). Reopen (a) only if (c) fails its `test/alloc.mjs` copyTo lanes or `npm run inline-diff` exits 1 on it in the R1 build unit (future; deopt-diff there is REPORTED and decides nothing); reopen (b) only if a strict-hold Float32 crossover reaches >= 1024 samples.
+- **Gate.** None (refusal). Reopen (a) only if (c) fails its `test/alloc.mjs` copyTo lanes or
+  `inlining-budget-diff --fn copyTo` exits 1 on it (deopt-diff is REPORTED and decides nothing); reopen (b)
+  only if a strict-hold Float32 crossover reaches >= 1024 samples. The Q-R1B-ROUTER cutoff is the one
+  sanctioned loop cutoff; moving it needs a new strict A/B.
+
+### A12. Alias-check buffer cache WITHOUT an identity key REFUSED (R1b)
+
+- **What happened.** V-onebuf cached `this.data`'s buffer at construction to save one ~5 ns getter call.
+- **Root cause.** `data` is `readonly` only in the .d.ts; at runtime it is a writable field. A caller that
+  assigns `rb.data` would leave the cached buffer stale, so the alias check fails OPEN for that caller.
+- **Evidence.** `.handoff/research/r1b/variants/V-onebuf/` (03d1434f); `.handoff/PROPOSAL-r1b.md` section 6.
+- **Law.** 2.
+- **Gate.** None (refusal). Reopen only with a cache that re-reads the intrinsic getter whenever `rb.data` is
+  not the cached array (V-split32c's `bufOf` key, written only AFTER the getter returned), with node:test cases
+  that reassign `rb.data` to a TypedArray (expects the alias RangeError) and to a non-TypedArray (expects
+  TypeError on EVERY call: the review-caught fail-open of 54279dbe, which keyed the cache before the read).
+  Held today by `test/copyto-r1b.test.js` A1a / A1b (B7).
+- **RULING.** Q-R1B-FIX = "V-split32c" (identity-keyed cache, key written after the read), maintainer,
+  2026-11-11, AskUserQuestion (`.handoff/PROPOSAL-r1b.md` RULINGS); V-onebuf was not chosen.
 
 ---
 
@@ -273,42 +304,53 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `test/RingBuffer.test.js` destroy test (one shared empty `Float32Array`); `test/torture.mjs`
   held-data lane (256 live instances' `data` reclaimed after `destroy()`).
 
-### B4. `copyTo` above 32 samples allocated 104 / 208 B (R1, partly fixed)
+### B4. `copyTo` above 32 samples allocated 104 / 208 B (R1, CLOSED)
 
-- **What happened.** `set` + `subarray` allocated one 104 B view per ring half: 104 B contiguous,
-  208 B wrapped. At <= 32 samples `copyTo` now uses a scalar loop: 0 B. Larger copies keep the
-  memcpy path and its views; the JSDoc, `.d.ts` and README state the allocation. The cutoff of 32
-  (`COPY_LOOP_MAX`) is nominal: the loop's speed against memcpy at that size is measured only PRELIMINARY (R1 step 1, see Evidence; strict hold PENDING).
-  The companions copy capacity-sized scratch (typically 1024), so they still allocate: ROADMAP R1
-  is open.
-- **Root cause.** `TypedArray.set` takes no source offset / length; the only allocation-free bulk
-  copy over a ring half is a JS loop.
-- **Evidence.** e3e1df1 / 0412025; `CHANGELOG.md` [1.2.0] Changed; `.handoff/HISTORY.md` 2026-10-14
-  release burst: `copyTo 33 contig 103.8 B/op`, `copyTo 64 wrapped 207.9 B/op` (Node 26.8.2 arm64,
-  load average 4.11, one run); ROADMAP.md R1 (the "10-20 MB/s at fleet scale" line there is NOMINAL
-  arithmetic, not a measurement). The scalar-loop-vs-`set` timing ran in the R1 step 1 research pass
-  (2026-11-11, `.handoff/research/r1/`, PRELIMINARY until its strict hold): at 32 samples the loop is
-  1.7x-3.9x faster than set + subarray (QUIET non-strict lock run, 3 compilations x 21 rounds, Node v26.8.2,
-  Apple M4 Pro, load1 1.70 -> 1.64), so 32 was not too high; the Float32 crossover is 64..256 and at 1024 / Float32 the
-  loop costs 4.7x-6.3x of set + subarray (v1 rung 64, v2 rungs 128 / 256 / 1024, each QUIET non-strict, load1 1.54..1.73, same host / Node / K; Float64: the loop stays ahead). Options and rulings: `.handoff/PROPOSAL-r1.md`.
+- **What happened.** In 1.2.1 `set` + `subarray` allocated one 104 B view per ring half above 32 samples: 104 B
+  contiguous, 208 B wrapped; both companions (1024-sample scratch) allocated every frame. R1 (99e8749,
+  2026-11-11) made `copyTo` allocate 0 B at every size: full Float32 ring above 32 samples -> ROT (`set` +
+  `copyWithin` + a loop over the smaller half), everything else -> the masked scalar loop; `copyToFast` keeps the
+  allocating memcpy path. R1b (working tree) added the <= 32 loop router back (Q-R1B-ROUTER, A11 / A12 / D10).
+  The cutoff 32 (`COPY_LOOP_MAX`) is nominal. Closed on allocation; the speed trade-off is REPORTED, see Evidence.
+- **Root cause.** `TypedArray.set` takes no source offset / length; the only allocation-free bulk copy over a
+  ring half is a JS loop, or a view-free `set` of the whole storage plus `copyWithin` (ROT).
+- **Evidence.** Before: e3e1df1 / 0412025; `CHANGELOG.md` [1.2.0] Changed; `.handoff/HISTORY.md` 2026-10-14
+  release burst: `copyTo 33 contig 103.8 B/op`, `copyTo 64 wrapped 207.9 B/op` (Node 26.8.2 arm64, load average
+  4.11, one run). The loop-vs-`set` research (2026-11-11, `.handoff/research/r1/`, PRELIMINARY): at 32 samples
+  the loop is 1.7x-3.9x faster than set + subarray, the Float32 crossover is 64..256 and at 1024 / Float32 the
+  loop costs 4.7x-6.3x of set + subarray (QUIET non-strict, 3 compilations x 21 rounds, Apple M4 Pro, Node
+  v26.8.2, load1 1.54..1.73). After: 99e8749 (R1 build), 5ae2266 (`npm run bench:copyto`), R1b fix in the
+  working tree. Alloc: `.handoff/r1b-fix/evidence/burst-verify.log` (`npm run verify`, 2026-11-12, Node v26.8.2,
+  host PRELIMINARY load1 4.72 vs baseline 2.21): `copyTo 32 wrapped` 0.2, `copyTo 33 contiguous` 0.0,
+  `copyTo 1024 F32 full head 0` 0.1, `start 512` 0.0, `start 768` 0.1, `1023 non-full` 0.0, `1024 -> Float64
+  contiguous / wrapped` 0.2 / 0.2 steady-state B/op; `copyToFast 1024` 104.0 / 208.1 B/op (REPORTED);
+  verify exit 0, 130 / 130 tests. Speed (STATISTICAL, ONE `quiet-lock run --strict`, exit 0, 2026-11-12T03:00:01Z
+  .. 03:08:19Z, host QUIET load1 2.10 -> 1.36 vs baseline 2.21, Apple M4 Pro, Node v26.8.2 / V8
+  14.6.202.34-node.28, K 21 x 3 compilations = 63 paired ratios, median [Q1..Q3]; `.handoff/r1b-fix/T5-SUMMARY.md`):
+  R1b / 1.2.1 at 32 samples 1.33-1.38x (10.8 -> 14.8 ns f32); at 64 0.24-0.67x; at 1024 / f32 contiguous 0.75x,
+  but wrapped 3.10 [2.80..3.16]x (84.0 -> 257.0 ns) and partial 3.75 [3.52..3.81]x (83.1 -> 310.1 ns) -- the
+  WORST cells; f64 dst at 1024 0.41-0.61x. Also 256 / f32 wrap 1.30x, part 1.26x. R1 (99e8749) alone was 2.3-4.0x (R1 B-S2 T5, `.handoff/R1/evidence/S/t5-summary.md`, strict, 2026-11-11T07:34Z, QUIET, 2.28-3.98)
+  slower than 1.2.1 at 32 (24.6-43.0 ns in the T5-SUMMARY FC column), which R1b cut to ~1.35x.
 - **Law.** 5, 7.
-- **Gate.** `test/alloc.mjs` lanes `copyTo 32, contiguous`, `copyTo 32, wrapped` and
-  `copyTo 32 -> Float64Array, wrapped` (gated, < 1 B/op). The `copyTo 33` / `copyTo 64` set-path
-  lanes are REPORTED (`'report'`) and never gated. R1 adds 1024 lanes when it lands.
+- **Gate.** `test/alloc.mjs` copyTo lanes (32 contiguous / wrapped, 32 -> Float64 wrapped, 33, 64, 1024 F32 full
+  at three heads, 1023 non-full, 1024 -> Float64 contiguous / wrapped, 8 full wrapped on-heap; < 1 B/op gated);
+  `copyToFast` lanes and `copyTo 33 / 64` are REPORTED; `test/torture.mjs` lanes `copyTo 32 ...` and `copyTo 1024
+  F32, start walks 0..1023`. Speed: `npm run bench:copyto` by hand, strict (C13 / D8).
 
-### B5. README: "Each stage holds zero allocation in steady state" was false
+### B5. README: "Each stage holds zero allocation in steady state" was false (CLOSED by R1)
 
-- **What happened.** The README Companion libraries / Ecosystem diagram said the pipeline stages
-  hold zero allocation in steady state. `lite-stats-math` (`compute`, `quantile`) and
-  `lite-canvas-graph` (`render`) call `copyTo` with a capacity-sized scratch, so once the ring holds
-  more than 32 samples each call allocates 104 B contiguous or 208 B wrapped. Found 2026-10-14 (the
-  audit left it "unchecked", then the ROADMAP R1 finding checked the callers); the README now says
-  so.
+- **What happened.** The README Companion libraries / Ecosystem diagram said the pipeline stages hold zero
+  allocation in steady state. `lite-stats-math` (`compute`, `quantile`) and `lite-canvas-graph` (`render`) call
+  `copyTo` with a capacity-sized scratch, so once the ring held more than 32 samples each call allocated 104 B
+  contiguous or 208 B wrapped. Found 2026-10-14 (the audit left it "unchecked", then the ROADMAP R1 finding
+  checked the callers); 1.2.0 made the README say so. R1 (99e8749) removed the allocation: 1024-sample
+  `copyTo` reads 0.0-0.2 B/op in the closing verify (B4 Evidence), so the stage claim is true for the
+  `copyTo` call path again; the README states it (docs batch B4).
 - **Root cause.** A claim written about the ring's entry points, not about how the callers use it.
 - **Evidence.** 0412025; `CHANGELOG.md` [1.2.0] Docs; ROADMAP.md R1 (callers at
-  `LiteStatsMath/StatsMath.js:59,103`, `LiteCanvasGraph/CanvasGraph.js:157`).
+  `LiteStatsMath/StatsMath.js:59,103`, `LiteCanvasGraph/CanvasGraph.js:157`); 99e8749; B4 Evidence.
 - **Law.** 7.
-- **Gate.** None automated. The README line as it stands (states 104 / 208 B) plus the R1 alloc lanes (1024 contiguous / wrapped) when R1 lands.
+- **Gate.** `test/alloc.mjs` copyTo 1024 lanes (B4); the README line is a reviewer doc-truth check.
 
 ### B6. Docs: `get(i)` listed as allocation-free; `ceilPow2` domain undocumented
 
@@ -322,6 +364,29 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 7.
 - **Gate.** `test/alloc.mjs` `CONTROL get(i)` (reads 16 B, must); `ceilPow2` case in
   `test/RingBuffer.test.js`.
+
+### B7. `copyTo` into a dst sharing the ring's buffer silently corrupted a wrapped ring (R1 / R1b)
+
+- **What happened.** In 1.2.1 a `dst` viewing `rb.data.buffer` was accepted: each `set` is overlap-safe alone,
+  but the second half reads storage the first half overwrote, and the <= 32 loop corrupts too. Probe on the
+  frozen build (dst = `new Float32Array(rb.data.buffer)`, capacity 64 full): head 32 -> 32 of 64 slots wrong,
+  head 16 -> 16 wrong, contiguous -> 0 wrong. R1 (99e8749): `copyTo` and `copyToFast` read `dst`'s buffer through
+  the intrinsic `%TypedArray%.prototype.buffer` getter and throw `RangeError` before the first store when it is
+  the ring's buffer. It stays closed after `rb.data` is reassigned: R1b's identity-keyed buffer cache re-reads the
+  getter whenever `rb.data` is not the cached array (A1a: `data` replaced by a view of `dst` -> RangeError on 3
+  calls in a row, `dst` unchanged; A1b: `data` replaced by an Array -> TypeError on each of 3 calls, `dst`
+  untouched). The research-timed build 54279dbe wrote the cache key BEFORE the getter read, so after a failed
+  read the next call skipped the check: a fail-open caught in the R1b research review (fixed in b93aab2c).
+- **Root cause.** A bulk copy over two halves of one storage with no overlap check; then a cache keyed before it
+  was validated (law 2).
+- **Evidence.** `.handoff/PROPOSAL-r1.md` Q-R1-ALIAS (`research/r1/runs/controls/review/alias-check.mjs` +
+  `.log`); 99e8749; `.handoff/HISTORY.md` R1b research pass (54279dbe archived in
+  `.handoff/research/r1b/variants/archive/`); `test/copyto-r1b.test.js` (A1a / A1b are regression pins on the
+  frozen before build; the 54279dbe build fails A1b, `tap-FAILOPEN.tap`); `.handoff/r1b-fix/evidence/tap-FAILOPEN.tap`.
+- **Law.** 1, 2.
+- **Gate.** `test/copyto-r1b.test.js` A1a / A1b; the R1 alias cases in `test/copyto.test.js`; Q-R1-ALIAS ruling
+  (RangeError, Q-F1: `copyToFast` too). Cost: an aliasing call that was correct in 1.2.1 (a contiguous ring,
+  non-overlapping view) now throws.
 
 ---
 
@@ -490,6 +555,39 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `test/InliningTool.test.js` (every-tier control row, missing-tier-file row, scoped-TMPDIR
   row, first-call hang row, anchored driver-exit row).
 
+### C12. Torture `n/a` rows failed open (review-caught, R1 build unit B2)
+
+- **What happened.** B2 added the `copyToFast` lane to `test/torture.mjs` and made a lane `n/a` when the method
+  is missing on an explicit (older) build. Review round 1 (REJECTED, 2 LITERAL) found that an unmeasured gated
+  row printed `n/a` in its verdict column while the GATE line still read `ok`, and that the GC-count resolution
+  (`res=`) was stated without the per-lane B/op it resolves. Round 2 REJECTED once more (1 line: a null-report
+  guard hid the blind-control message); a literal-only fix followed and round 3 APPROVED. Now an unmeasured
+  gated lane is reported on stderr (`lane "<name>" not measured (method missing on this build)`) and fails the
+  GATE; `res=` prints `n/a` only when minor is 0 or NaN, with every lane's alloc B/op in its own column.
+- **Root cause.** A gate that renders "not measured" as a printable value instead of a failure (law 2). Residual
+  nit (FILLER): an unmeasured gated row's verdict column still prints `n/a`, not `FAIL`; the GATE line is the
+  fail.
+- **Evidence.** 99e8749; `.handoff/HISTORY.md` R1 build burst 1 (engine unit, B2 rounds); `.handoff/R1/evidence/E/
+  b2-failclosed.log`, `b2-fix-checks.log`. The reviewer text is not on disk as a file (reviewer text not on disk; HISTORY.md:164-166).
+- **Law.** 1, 2, 3.
+- **Gate.** `test/torture.mjs` (`not measured` branch and the `res=` line); `.handoff/R1/evidence/E/b2-revert-torture.log`.
+
+### C13. Bench: a NaN BEFORE / FAST round failed open (review-caught, B-S1)
+
+- **What happened.** `test/bench/copyto-ab.mjs` review round 1 (REJECTED, 2 LITERAL + 1 DESIGN): a NaN BEFORE (or
+  FAST, with `--fast`) timing made the CAND_BEFORE / FAST_BEFORE / CAND_FAST statistics NaN; the row printed
+  `n/a` but the run exited 0 "STATISTICAL (QUIET host, all checks ok)". The `q()` NaN guard also had no teeth.
+  Fix: `if (!(st[k].q1 <= st[k].q3)) v.push(k + ' not measured (NaN)')` for those keys, with the self-test rows
+  `BEFORE NaN round -> 1` and `FAST NaN round -> 1` (AA and SLOW NaN rounds -> 2 already). Round 2 APPROVED
+  (copyto-ab.mjs 483fa10e, self-test 52 / 52). The DESIGN item (retain on signal) was ruled "Known limit,
+  FILLER" by the maintainer (PLAN-S ADDENDUM A2).
+- **Root cause.** A comparison written positively (`x <= y` pushes nothing on NaN) on a statistic the judge must
+  fail closed on (law 1).
+- **Evidence.** B-S1 commit 5ae2266; `.handoff/R1/evidence/S/review-bs1-r1.md`; `.handoff/HISTORY.md` R1 build
+  burst 2.
+- **Law.** 1, 2.
+- **Gate.** `test/bench/copyto-ab.mjs --self-test` (the two NaN-round rows; run by hand, 52 / 52 at approval).
+
 ---
 
 ## D. Measurement traps
@@ -574,8 +672,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 3, 4. A probe's B/op lane at >= 20,000 calls per window classifies objects per call (loops
   < 8 B = no 16 B box; SET >= 52 / >= 156 B = one / two 104 B views); "< 1 B/op" is proven only by
   `test/alloc.mjs` at N = 1,000,000; the < 8 B boundary is not yet trusted -- its error at 20,000 calls (SET 91.7 of 104 B) exceeds the 8 B margin and it has no one-16-B-box must-fail column yet (PROPOSAL-r1 Q-STATHOST).
-- **Gate.** None in the repo (research harness). The R1 build unit's `test/alloc.mjs` copyTo 1024
-  lanes will hold (future) the < 1 B/op claim.
+- **Gate.** None in the repo (research harness). `test/alloc.mjs` copyTo 1024 lanes (R1 build,
+  99e8749) now hold the < 1 B/op claim.
 
 ### D7. A single-layout oracle missed a whole branch (R1 step 1 probe)
 
@@ -588,3 +686,62 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/research/r1/runs/controls/mut-rot-else.txt` (oracle true, sweep false).
 - **Law.** 1.
 - **Gate.** None yet (research harness). The R1 build unit's oracle will be the sweep extended with dstOffset > 0 and guards on both sides, as node:test (PROPOSAL-r1 section 6).
+
+### D8. An A/A on an allocating before-build is not an A/A (R1 build, B-S1)
+
+- **What happened.** B-S1's first A/A design ran the frozen 1.2.1 build (FR) against itself. FR's `copyTo`
+  allocates 104 / 208 B above 32 samples, so the bench judge's B/op lane read VOID (exit 1) on 24 of 30 rows.
+  PLAN-S ADDENDUM A1 (2026-11-11) moved the A/A dry run and both B/op must-fail controls (`ctl-box`, `ctl-view`)
+  to FC vs FC (the approved R1 candidate eab8983a, 0 B/op at every size). The T5 run of record uses 1.2.1 only as
+  the BEFORE side of the contrast; its A/A twins are separate runs (T5-SUMMARY: A/A medians 0.973..1.066).
+- **Root cause.** An A/A needs a twin that passes the same gates the contrast must pass; an allocating build
+  cannot pass the zero-allocation lane (law 2).
+- **Evidence.** 5ae2266 (FC eab8983a); `.handoff/R1/PLAN-S.md` ADDENDUM A1; `.handoff/HISTORY.md` R1 build burst 2 (B-S1 review finding 1;
+  T4: `ctl-box` exit 1 CAND B/op 15.4-15.6, `ctl-view` exit 1 VIEW B/op 0.0, `aa-dry` FC vs FC exit 0 QUIET).
+- **Law.** 1, 3.
+- **Gate.** `npm run bench:copyto` (A/A twin on a 0 B/op build; STATISTICAL, by hand, strict).
+
+### D9. `npm run inline-diff`'s anchors miss `copyTo`
+
+- **What happened.** T6 ran `npm run inline-diff -- --after FC`: exit 0 on both runs, yet its function list is
+  `getOrDefault`, `peekNewest`, `peekOldest` (C10), so it never looked at `copyTo`. The package's own
+  `inlining-budget-diff` with `--fn copyTo` (1.2.1 vs the R1 candidate FC) reported DIFF: `copyTo` bytecode
+  385 -> 489 B, over TurboFan's default 460 B single-inline limit, so TurboFan stopped inlining it into callers.
+  After R1b, `--fn copyTo` FC vs the R1b file reports `copyTo: 489 -> 189 bytes (-300)` (REPORTED;
+  `.handoff/r1b-fix/evidence/inl-FC-vs-new.log`; `copyCheck` and `rotCopy` are now separate functions that
+  TurboFan inlines into `copyTo`).
+- **Root cause.** An exit-0 gate proves only the functions it names; a function added to the contract needs a
+  new anchor.
+- **Evidence.** 99e8749 (FC eab8983a), R1b 63eb5bc1 (working tree); `.handoff/HISTORY.md` R1 build burst 2 (T6; `inline-diff-copyto.log`); `.handoff/r1b-fix/evidence/
+  inl-FC-vs-new.log` (Node v26.8.2).
+- **Law.** 1, 5.
+- **Gate.** REPORTED, by hand under the quiet lock: `bash test/tools/inlining-budget-diff.sh --fn copyTo ...`.
+  `inline-diff.mjs` is not changed (its function list is a FILLER candidate).
+
+### D10. The intrinsic `buffer` getter and the 460 B inline limit cost R1 copyTo ~21 ns at 32 samples (R1b)
+
+- **What happened.** R1 copyTo (99e8749) ran 2.3-4.0x (R1 B-S2 T5, `.handoff/R1/evidence/S/t5-summary.md`, strict, 2026-11-11T07:34Z, QUIET, 2.28-3.98)
+  slower than 1.2.1 at 32 samples (T5 strict A/B, 11 -> 25-44 ns) although both validate the same way. The R1b research pass (2026-11-11) ablated one capability per
+  frozen variant: lost caller inlining ~11-12 ns (copyTo bytecode 385 -> 489 B, over TurboFan's 460 B
+  single-inline limit, D9), ~4-5 ns per intrinsic `%TypedArray%.prototype.buffer` getter call (two per call for
+  the alias check), and wrapped ROT at 32 samples ~13 ns over the loop.
+- **Root cause.** The alias check and the ROT router added ~104 B of bytecode to one method, so callers stopped
+  inlining it; the `buffer` getter apparently is not reduced by TurboFan as `length` / `toStringTag` are (all
+  inferred from timings: ~4-5 ns per `buffer` read vs <= ~1 ns; not confirmed from V8 source or a trace).
+- **Evidence.** Build under test 5ae2266 (FC eab8983a), FR 132d003 / 43adb369; frozen variants
+  `.handoff/research/r1b/variants/` -- V-noalias bab60068, V-onebuf 03d1434f, V-loop32 1360bb5c, V-split 46c95d02,
+  V-split32 4bb914b8, V-split32c 54279dbe (timed) / b93aab2c (review-fixed; differs only in the cache-miss
+  branch); `.handoff/research/r1b/PROGRESS.md` (rungs 0-2), `runs/timed/analysis-rung0-1.md`,
+  `analysis-rung2.md`, `runs/untimed/inl-*.log`. Rung 0 / 1: `quiet-lock run` non-strict, 2026-11-11T08:21:59Z-
+  08:26:56Z, load1 2.98 at start, 2.75-4.03 over the five runs (rung0-FC and V-onebuf QUIET exit 0; V-noalias /
+  V-loop32 / V-split exit 2 PRELIMINARY); rung 2: `run --strict`, 08:35:44Z-08:37:27Z, load1 2.30 -> 3.70, QUIET,
+  exit 0 both. Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations, one run each. Strict
+  rung 2: V-split32c (shared copyCheck, rotCopy helper, loop at <= 32, identity-keyed buffer cache) 1.32-1.35x
+  of 1.2.1 at 32, V-split32 (no cache) 1.69-1.80x; both 0 B/op, faster than 1.2.1 at 64. The shipped fix (63eb5bc1)
+  in the T5 run of record (B4 Evidence): 1.33-1.38x of 1.2.1 at 32. Bytecode 489 -> 189 B: `inl-FC-vs-new.log` (D9).
+- **Law.** 5 (numbers from this cycle's logs only), 1 (V-noalias was the alias suite's must-fail column).
+- **Gate.** None (REPORTED). The T5 strict A/B on the final candidate is the run of record
+  (`.handoff/r1b-fix/T5-SUMMARY.md`); `inlining-budget-diff --fn copyTo` reports copyTo's bytecode against 460 B
+  (REPORTED).
+- **RULING.** Q-R1B-FIX = "V-split32c"; Q-R1B-ROUTER = "Loop at <= 32" (amends Q-R1 "`COPY_LOOP_MAX` goes",
+  A11); maintainer, 2026-11-11, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r1b.md` RULINGS).

@@ -69,6 +69,14 @@ export function ceilPow2(n) {
 const EMPTY_F32 = new Float32Array(0);
 
 /**
+ * Copies of at most this many samples take `copyTo`'s masked scalar loop,
+ * even a full ring into a Float32Array; only a full Float32 ring of more
+ * samples takes the intrinsic `set` + `copyWithin` rotate (`rotCopy`).
+ * Ruling Q-R1B-ROUTER ("loop at <= 32"); the value 32 is nominal.
+ */
+const COPY_LOOP_MAX = 32;
+
+/**
  * The intrinsic %TypedArray%.prototype.length getter. `copyTo` bounds-checks
  * against it, not `dst.length`: a subclass can override `length`, and the
  * scalar loop would then drop its out-of-range stores silently. It also
@@ -94,6 +102,14 @@ const TA_SET = TA_PROTO.set;
 const TA_COPY_WITHIN = TA_PROTO.copyWithin;
 
 /**
+ * EMPTY_F32's buffer, read through the intrinsic getter: the empty state of
+ * the alias-check cache (`_bufOf` = EMPTY_F32, `_buf` = EMPTY_BUF), set by
+ * the constructor and by `destroy()`. Every store keeps
+ * `_buf === TA_BUFFER.call(_bufOf)`.
+ */
+const EMPTY_BUF = TA_BUFFER.call(EMPTY_F32);
+
+/**
  * Cold-path error builders shared by `copyTo` and `copyToFast`; `name` is the
  * calling method, so each message names the method that threw. Kept out of
  * the method bodies so the string building costs no bytes there.
@@ -116,6 +132,62 @@ function aliasError(name) {
     return new RangeError(
         'LiteRingBuffer: ' + name + ' dst shares the ring\'s buffer (copy into a separate array); nothing written'
     );
+}
+
+/**
+ * The shared prologue of `copyTo` and `copyToFast` (so the two validate
+ * identically by construction). Checks, in order, all before the first
+ * store: TypeError (not a TypedArray), RangeError (bounds), then -- only
+ * when count > 0 -- the alias RangeError. Returns count; the caller returns
+ * 0 when it is 0. `data` is the array the caller will copy from (read once
+ * by the caller), so the alias check covers exactly the copied array.
+ *
+ * `data`'s buffer comes from an identity-keyed cache on the ring (`_bufOf`
+ * / `_buf`): re-read through the intrinsic `buffer` getter whenever `data`
+ * is not the cached array, and the key is stored only AFTER that read, so a
+ * `data` that is not a TypedArray throws the getter's TypeError on every
+ * call. A TypedArray's buffer never changes, so the cache cannot go stale.
+ * `dst`'s buffer is read through the intrinsic getter on every call.
+ */
+function copyCheck(rb, data, dst, dstOffset, name) {
+    // isView alone also admits a DataView, which has no indexed slots or `set`.
+    if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError(name, dst);
+    const dlen = TA_LENGTH.call(dst);
+    const c = rb.count;
+    // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
+    if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + c <= dlen)) {
+        throw boundsError(name, c, dstOffset, dlen);
+    }
+    if (c !== 0) {
+        if (data !== rb._bufOf) {
+            rb._buf = TA_BUFFER.call(data);
+            rb._bufOf = data;
+        }
+        // Fail closed: copying a ring into its own storage would overwrite
+        // samples before they are read.
+        if (TA_BUFFER.call(dst) === rb._buf) throw aliasError(name);
+    }
+    return c;
+}
+
+/**
+ * The full-ring Float32 path of `copyTo` (count === capacity, count >
+ * COPY_LOOP_MAX, dst tagged Float32Array). Full ring: start === head. Copy
+ * storage as-is with one intrinsic `set`, then rotate it into order with one
+ * intrinsic `copyWithin` and a scalar loop over the smaller ring half.
+ */
+function rotCopy(dst, data, dstOffset, start, cap) {
+    const a = cap - start;
+    TA_SET.call(dst, data, dstOffset);
+    if (start !== 0) {
+        if (start <= a) {
+            TA_COPY_WITHIN.call(dst, dstOffset, dstOffset + start, dstOffset + cap);
+            for (let i = 0; i < start; i++) dst[dstOffset + a + i] = data[i];
+        } else {
+            TA_COPY_WITHIN.call(dst, dstOffset + a, dstOffset, dstOffset + start);
+            for (let i = 0; i < a; i++) dst[dstOffset + i] = data[start + i];
+        }
+    }
 }
 
 export class RingBuffer {
@@ -145,6 +217,17 @@ export class RingBuffer {
         this.head = 0;
         /** @type {number} live samples, 0..capacity */
         this.count = 0;
+        /**
+         * @private
+         * @type {Float32Array} alias-check cache key: the array `_buf` was read
+         *       from (see copyCheck). Starts empty; filled by the first non-empty copy.
+         */
+        this._bufOf = EMPTY_F32;
+        /**
+         * @private
+         * @type {ArrayBuffer} `_bufOf`'s buffer, read through the intrinsic getter
+         */
+        this._buf = EMPTY_BUF;
     }
 
     /**
@@ -223,11 +306,12 @@ export class RingBuffer {
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
      * Allocates nothing, at any count.
      *
-     * A full ring copied into a Float32Array (a subclass counts; the type is
-     * read through the intrinsic Symbol.toStringTag getter) is one intrinsic
-     * `set` of the whole storage, then one intrinsic `copyWithin` and a scalar
-     * loop over the smaller ring half to rotate it into order. Every other
-     * case is a masked scalar loop. `set`, `copyWithin`, `buffer` and `length`
+     * A full ring of more than 32 samples (COPY_LOOP_MAX) copied into a
+     * Float32Array (a subclass counts; the type is read through the intrinsic
+     * Symbol.toStringTag getter) is one intrinsic `set` of the whole storage,
+     * then one intrinsic `copyWithin` and a scalar loop over the smaller ring
+     * half to rotate it into order. Every other case, including every copy of
+     * at most 32 samples, is a masked scalar loop. `set`, `copyWithin`, `buffer` and `length`
      * are the %TypedArray%.prototype intrinsics captured at module load, so a
      * subclass that overrides them cannot change what is written. For the
      * `set` + `subarray` copy (allocates one view per ring half), see
@@ -238,6 +322,15 @@ export class RingBuffer {
      * (bounds), return 0 when the ring is empty, RangeError (alias) -- all
      * before the first store -- then a BigInt `dst` throws TypeError from that
      * first store. So an aliasing BigInt64Array gets the alias RangeError.
+     * The checks live in a shared helper (`copyCheck`, also used by
+     * `copyToFast`): an error's stack has one `copyCheck` frame between the
+     * error and this method; the messages are unchanged.
+     *
+     * The alias check caches `data`'s buffer, keyed on the `data` array
+     * itself (`_bufOf` / `_buf`, internal). After a caller replaces
+     * `this.data`, the cache keeps the replaced array (and its buffer)
+     * referenced until the next non-empty `copyTo` / `copyToFast` or
+     * `destroy()`; `reset()` does not release it.
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number} [dstOffset=0]
@@ -254,35 +347,14 @@ export class RingBuffer {
      *         Nothing is written.
      */
     copyTo(dst, dstOffset = 0) {
-        // isView alone also admits a DataView, which has no indexed slots or `set`.
-        if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError('copyTo', dst);
-        const dlen = TA_LENGTH.call(dst);
-        const c = this.count;
-        // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
-        if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + c <= dlen)) {
-            throw boundsError('copyTo', c, dstOffset, dlen);
-        }
-        if (c === 0) return 0;
+        // Read once: copyCheck alias-checks the same array the loop copies.
         const data = this.data;
-        // Fail closed: copying a ring into its own storage would overwrite
-        // samples before they are read.
-        if (TA_BUFFER.call(dst) === TA_BUFFER.call(data)) throw aliasError('copyTo');
+        const c = copyCheck(this, data, dst, dstOffset, 'copyTo');
+        if (c === 0) return 0;
         const mask = this.mask;
         const start = (this.head - c) & mask;
-        if (c === this.capacity && TA_TAG.call(dst) === 'Float32Array') {
-            // Full ring: start === head. Copy storage as-is, then rotate it.
-            const cap = c;
-            const a = cap - start;
-            TA_SET.call(dst, data, dstOffset);
-            if (start !== 0) {
-                if (start <= a) {
-                    TA_COPY_WITHIN.call(dst, dstOffset, dstOffset + start, dstOffset + cap);
-                    for (let i = 0; i < start; i++) dst[dstOffset + a + i] = data[i];
-                } else {
-                    TA_COPY_WITHIN.call(dst, dstOffset + a, dstOffset, dstOffset + start);
-                    for (let i = 0; i < a; i++) dst[dstOffset + i] = data[start + i];
-                }
-            }
+        if (c > COPY_LOOP_MAX && c === this.capacity && TA_TAG.call(dst) === 'Float32Array') {
+            rotCopy(dst, data, dstOffset, start, c);
             return c;
         }
         for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
@@ -307,15 +379,9 @@ export class RingBuffer {
      *         not the TypeError. Nothing is written.
      */
     copyToFast(dst, dstOffset = 0) {
-        if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError('copyToFast', dst);
-        const dlen = TA_LENGTH.call(dst);
-        const c = this.count;
-        if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + c <= dlen)) {
-            throw boundsError('copyToFast', c, dstOffset, dlen);
-        }
-        if (c === 0) return 0;
         const data = this.data;
-        if (TA_BUFFER.call(dst) === TA_BUFFER.call(data)) throw aliasError('copyToFast');
+        const c = copyCheck(this, data, dst, dstOffset, 'copyToFast');
+        if (c === 0) return 0;
         const start = (this.head - c) & this.mask;
         const firstLen = Math.min(this.capacity - start, c);
         TA_SET.call(dst, data.subarray(start, start + firstLen), dstOffset);
@@ -359,10 +425,14 @@ export class RingBuffer {
     /**
      * Drop the reference to the backing storage so the GC can reclaim it.
      * `data` becomes a shared empty Float32Array (not `null`; see EMPTY_F32).
+     * The alias-check cache (`_bufOf` / `_buf`) is reset to its empty state,
+     * so it no longer holds the storage or its buffer either.
      * Calling any other method afterwards is undefined behavior.
      */
     destroy() {
         this.data = EMPTY_F32;
+        this._bufOf = EMPTY_F32;
+        this._buf = EMPTY_BUF;
         this.count = 0;
         this.head = 0;
         this.capacity = 0;

@@ -100,13 +100,17 @@ export class RingBuffer implements Iterable<number> {
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
      * Allocates nothing at any size in steady state (gated by `npm run alloc`);
      * the first alias check on an on-heap (<= 64 B) ring or `dst` materializes
-     * its ArrayBuffer once. A full ring into a Float32Array is one intrinsic
-     * `set` + `copyWithin` rotation plus a scalar loop over the smaller ring
-     * half; every other copy is a scalar loop. `set`, `copyWithin`, `buffer` and
+     * its ArrayBuffer once. A full ring of more than 32 samples into a
+     * Float32Array is one intrinsic `set` + `copyWithin` rotation plus a scalar
+     * loop over the smaller ring half; every other copy, including every copy
+     * of at most 32 samples, is a scalar loop. `set`, `copyWithin`, `buffer` and
      * `length` are the %TypedArray%.prototype intrinsics, so a subclass that
      * overrides them cannot change what is written.
      *
-     * Checks run in this order, all before the first store: TypeError (not a
+     * The ring caches its storage's buffer in two own keys (`_bufOf`, `_buf`): a
+     * replaced `data` stays referenced until the next non-empty copy or `destroy()`.
+     * `this.data` is read once per call, before the checks (an accessor `data`
+     * runs first). Checks run in this order, all before the first store: TypeError (not a
      * TypedArray), RangeError (bounds), return 0 when the ring is empty,
      * RangeError (alias), then the first store -- so an aliasing BigInt `dst`
      * gets the alias RangeError, not a TypeError.

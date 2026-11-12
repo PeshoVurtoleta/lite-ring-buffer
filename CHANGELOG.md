@@ -10,10 +10,30 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
-Tooling and docs only: no runtime change (`RingBuffer.js` and `RingBuffer.d.ts` untouched).
+Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copyTo` (R1 + R1b) plus tooling and docs. Alloc figures: `npm run alloc` inside `npm run verify`, 2026-11-12, Node v26.8.2 arm64 (DETERMINISTIC, gated). Timing: STATISTICAL, REPORTED only.
+
+### Changed
+
+- `copyTo` allocates 0 B at every size (1.2.1: scalar loop up to 32 samples, `set` over two `subarray` views above, 104 B contiguous / 208 B wrapped). Every `copyTo` lane in `npm run alloc` is <= 0.2 B per call against the < 1 B gate.
+- `copyTo` uses the %TypedArray%.prototype `set` / `copyWithin` / `buffer` intrinsics, so a `dst` subclass that overrides them no longer changes the result.
+- Full Float32 rings of <= 32 samples take the masked loop; only above 32 (`COPY_LOOP_MAX = 32`, nominal) a full Float32 ring takes `set` + `copyWithin` rotation plus a loop over the smaller half. The loop may quiet a signalling-NaN payload.
+- Validation moved into a shared helper (`copyCheck`, used by `copyTo` and `copyToFast`): error stacks gain two frames vs 1.2.1 (the error builder and `copyCheck`); messages are unchanged. `this.data` is read once per call, before the checks.
+- The ring carries two enumerable own keys, `_bufOf` and `_buf` (alias-check cache; they show in `Object.keys`, and `JSON.stringify` of a ring that has copied serializes its storage twice). A replaced `data` (and its buffer) stays referenced until the next non-empty copy or `destroy()`; `reset()` does not release it.
+- Speed vs 1.2.1, one strict QUIET run 2026-11-12 (Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.10 -> 1.36, baseline 2.21, K 21 x 3 compilations): n = 32 is 1.33-1.38x slower; n = 64 and 128 are faster in every layout; a Float64 `dst` is faster at every n >= 64; Float32 rings are 1.26-1.30x slower at 256 (wrapped, count n-1) and 3.10x (full, wrapped) / 3.75x (count n-1) slower at 1024. Use `copyToFast` when large wrapped or partly filled Float32 copies are hot and 104 / 208 B per call is acceptable.
+
+### Added
+
+- `copyToFast(dst, dstOffset)`: the 1.2.1 `set` + `subarray` copy with identical validation and errors; allocates 104 B (contiguous) / 208 B (wrapped) per call (REPORTED: 104.0 / 208.1 B/op in `npm run alloc`).
+- Dev-only `npm run bench:copyto` (`test/bench/copyto-ab.mjs`; STATISTICAL: strict quiet lock, not in `verify`, not shipped): interleaved before/after `copyTo` A/B with A/A and must-fail controls.
+
+### Fixed
+
+- A `dst` sharing the ring's ArrayBuffer made `copyTo` silently corrupt a wrapped ring; it now throws `RangeError` and writes nothing.
 
 ### Tests
 
+- `npm test` count 90 -> 130: `test/RingBuffer.test.js` 60, `test/InliningTool.test.js` 31, new `test/copyto.test.js` 30 and `test/copyto-r1b.test.js` 9 (`EXPECTED` and `FILES` in `test/count.mjs`). New lanes cover alias, overriding-subclass, validation and full-ring parity cases for `copyTo` / `copyToFast`.
+- `npm run torture` gains a gated `copyTo` 1024 Float32 lane (start walks 0..1023) and a buffer tracker: the backing `ArrayBuffer` of 256 live instances is reclaimed after `destroy()`.
 - New `npm run inline-diff` (`test/tools/inline-diff.mjs`, REPORTED tier: not in `verify`, run by hand under the quiet lock before each release and in any unit that edits `RingBuffer.js`). It stages `git show HEAD:RingBuffer.js` (or `--before FILE` / `--before-ref REF`) and the working-tree file, plus three must-fail controls (copies whose `getOrDefault`, `peekNewest` or `peekOldest` is padded past V8's default 460-byte max-inlined-bytecode-size), and runs the vendored script with `--fn getOrDefault,peekNewest,peekOldest` on turbo and maglev. Exit 0 = A/A SAME and every control DIFF naming only its own function in every tier; 1 = A/A DIFF or a blind control; 2 = NO-VERDICT.
 - New `test/InliningTool.test.js` (31 tests, in `npm test`): vendored-script sha pin and its teeth, the script's `--self-test`, five script mutants that must go red plus a driver-exit mutant caught against real V8, and the `inline-diff.mjs` verdict / fail-closed rows against a stub script. A missing bash, git or node fails red; nothing skips.
 - `npm test` count 59 -> 90 (`test/RingBuffer.test.js` 59 + `test/InliningTool.test.js` 31; `EXPECTED` in `test/count.mjs`).

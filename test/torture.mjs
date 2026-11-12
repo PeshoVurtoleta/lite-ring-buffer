@@ -125,6 +125,12 @@ const dataTracker = createLeakTracker({
     name: 'lite-ring-buffer-data',
     onWarning: (w) => warns.push(w.kind + ':' + w.reason),
 });
+// The ring's buffer, followed beside its data: a copy caches the data's buffer
+// in the ring, destroy() must drop that too.
+const bufTracker = createLeakTracker({
+    name: 'lite-ring-buffer-buf',
+    onWarning: (w) => warns.push(w.kind + ':' + w.reason),
+});
 // No kernels: a RingBuffer owns no timer, listener, observer or DOM node, so
 // being collected is the desired outcome. Finalization itself is the proof.
 
@@ -152,7 +158,11 @@ function fillHeld(held) {
     for (let i = 0; i < HELD; i++) {
         const rb = new RingBuffer(1024);
         for (let k = 0; k < 64; k++) rb.push(VALS[k & 15]);
+        // One copy before destroy(): the buffer cache starts empty, so without a
+        // copy there is nothing for destroy() to drop.
+        SINK[0] += rb.copyTo(SCRATCH_1024, 0);
         dataTracker.track(rb.data, noop, 'data');
+        bufTracker.track(rb.data.buffer, noop, 'buf');
         held.push(rb);
     }
     return dataTracker.size();
@@ -164,7 +174,7 @@ function destroyHeld(held) {
 
 // FinalizationRegistry callbacks run on their own task: gc + a macrotask turn,
 // bounded at 20 rounds so a real retention still fails. Rounds used are printed.
-const DRAIN_ROUNDS = [0, 0];
+const DRAIN_ROUNDS = [0, 0, 0];
 async function drain(t, slot) {
     let live = t.size();
     let g = 0;
@@ -183,12 +193,15 @@ const findings = tracker.audit();
 
 const held = [];
 const dataMid = fillHeld(held);
+const bufMid = bufTracker.size();
 destroyHeld(held);
 const dataLive = await drain(dataTracker, 1);
+const bufLive = await drain(bufTracker, 2);
 // The instances are still reachable here: their data went, they did not.
 let heldAlive = 0;
 for (let i = 0; i < held.length; i++) if (held[i] instanceof RingBuffer && held[i].capacity === 0) heldAlive++;
 const dataFindings = dataTracker.audit();
+const bufFindings = bufTracker.audit();
 
 // ---- phase 2: GC budget, one function per lane ----------------------------
 function full(cap) {
@@ -387,16 +400,18 @@ for (const r of rows) {
 }
 
 const retentionOk = trackedMid === CYCLES && live === 0 && findings.length === 0;
-const dataOk = dataMid === HELD && dataLive === 0 && heldAlive === HELD && dataFindings.length === 0;
+const dataOk = dataMid === HELD && dataLive === 0 && heldAlive === HELD && dataFindings.length === 0 &&
+    bufMid === HELD && bufLive === 0 && bufFindings.length === 0;
 const ok = lanesOk && retentionOk && dataOk;
 
 console.log('retention: trackedMid=' + trackedMid + ' live=' + live + ' drains=' + DRAIN_ROUNDS[0] + ' findings=' + findings.length +
-    ' | held data: tracked=' + dataMid + ' live=' + dataLive + ' drains=' + DRAIN_ROUNDS[1] + ' instancesAlive=' + heldAlive + '/' + HELD);
+    ' | held data: tracked=' + dataMid + ' live=' + dataLive + ' drains=' + DRAIN_ROUNDS[1] + ' instancesAlive=' + heldAlive + '/' + HELD +
+    ' | held buf: tracked=' + bufMid + ' live=' + bufLive + ' drains=' + DRAIN_ROUNDS[2]);
 // Gate resolution: control bytes per minor / HOT ops ('n/a' if minor 0 or NaN).
 const ctlRow = rows.find((r) => r.kind === 'control');
 const res = ctlRow && ctlRow.minor > 0 ? ctlRow.bop / ctlRow.minor : NaN;
 console.log(
-    'GATE leak=size ' + live + '/0 findings=' + (findings.length + dataFindings.length) +
+    'GATE leak=size ' + live + '/0 findings=' + (findings.length + dataFindings.length + bufFindings.length) +
     ' warnings=' + warns.length +
     ' | gc major=' + gMajor + ' minor=' + gMinor + ' maxMs=' + gMaxMs.toFixed(2) +
     ' res=' + (res === res ? res.toFixed(2) : 'n/a') + ' B/op' +
@@ -428,5 +443,8 @@ if (!ok) {
     if (dataLive !== 0) console.error('  held data: ' + dataLive + ' backing arrays survived destroy()');
     if (heldAlive !== HELD) console.error('  held data: only ' + heldAlive + ' destroyed instances still reachable');
     for (const f of dataFindings) console.error('  finding ' + f.kind + ':' + f.reason);
+    if (bufMid !== HELD) console.error('  held buf: tracked ' + bufMid + ' of ' + HELD);
+    if (bufLive !== 0) console.error('  held buf: ' + bufLive + ' backing buffers survived destroy()');
+    for (const f of bufFindings) console.error('  finding ' + f.kind + ':' + f.reason);
     process.exitCode = 1;
 }

@@ -5,8 +5,9 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
 Baseline: 1.2.1 (prepared 2026-11-11: units D / D2 tooling + docs and LEDGER.md over 1.2.0, no runtime
-change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 and R2 are still open: `copyTo` keeps the 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`), and there is no
-`pushBatch`.
+change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 is built (99e8749, bench 5ae2266, R1b fix in the working tree; release 1.3.0 is the maintainer's call): `copyTo`
+allocates 0 B at every size and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
+after Q-R1B-ROUTER). R2 is still open: there is no `pushBatch`.
 
 Scope trimmed 2026-11-10 (maintainer). lite-o1 `RingLog` / `RingDeque` do NOT supersede this package (see
 Positioning). The work left is small: pay the suite-law debt, fix R1 (bug-grade), then add R2 / R3. R4 and
@@ -87,16 +88,16 @@ Maintainer rulings (AskUserQuestion, 2026-11-11):
 - OQ-2 = (a) "Inside npm test": `test/InliningTool.test.js` in `test/count.mjs` FILES + EXPECTED.
 - OQ-3 = (a) "git show HEAD": default before = `git show HEAD:RingBuffer.js` staged to temp, named by commit + sha.
 - OQ-4 = (a) "Go red, fail closed": no bash -> `npm test` red.
-Follow-ups: the R1 / R2 / R3 coder batches run `npm run inline-diff` (exit in the unit's evidence). The R1 / R2 coder batch unparks
-deopt-diff (LEDGER A8: `--fn copyTo` plus `pushBatch`, HEAD vs candidate, Float32 / Float64 dst, REPORTED).
-Parked / refused here: deopt-diff (A8), allocation-diff (A9), alloc-per-op (A10).
+Follow-ups: the R1 / R2 / R3 coder batches run `npm run inline-diff` (exit in the unit's evidence). Deopt-diff (LEDGER A8) was unparked in the R1 build burst (T7, REPORTED). `inline-diff`'s anchors do not
+cover `copyTo`: use `inlining-budget-diff.sh --fn copyTo` for it (LEDGER D9).
+Parked / refused in unit LU: deopt-diff (A8, since unparked), allocation-diff (A9), alloc-per-op (A10).
 
 ### R1 -- copyTo allocates at the sizes the ecosystem actually uses (bug-grade)
 
 Finding (2026-10-14): `StatsMath.compute` / `quantile` (`LiteStatsMath/StatsMath.js:59,103`) and
 `CanvasGraph.render` (`LiteCanvasGraph/CanvasGraph.js:157`) call `copyTo` with a capacity-sized scratch,
-typically 1024 samples. Above 32 samples `copyTo` takes the `set` + `subarray` path: 104 B per call
-contiguous, 208 B wrapped (measured, Node 26.8.2). So README's "Each stage holds zero allocation in steady
+typically 1024 samples. In 1.2.1, above 32 samples `copyTo` took the `set` + `subarray` path: 104 B per call
+contiguous, 208 B wrapped (measured, Node 26.8.2; fixed by R1, see STATUS). So README's "Each stage holds zero allocation in steady
 state" (the Ecosystem diagram) was false until 1.2.0 (fixed in 0412025, step 3): every frame of a graph or stats
 readout allocates.
 
@@ -115,17 +116,25 @@ a JS loop. Plan:
    n); (b) loop up to the size where it falls behind, plus an opt-in `copyTo(dst, off, { fast: true })` for
    memcpy. Option (b) must not allocate an options object at the call site. A cutoff tuned above 1024
    covers both companions.
-3. DONE in 1.2.0 (0412025): the README Ecosystem line now states the 104 / 208 B per frame. (Was: until
+3. DONE in 1.2.0 (0412025): the README Ecosystem line now states the 104 / 208 B per frame; R1 (99e8749) made that line state 0 B (docs batch B4). (Was: until
    then, fix the line; docs-only.)
 
-Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, expected 0 under the ruled (c) ROT + loop (`.handoff/PROPOSAL-r1.md` section 6: also a full-ring head n/2 lane and a non-full lane).
+Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, 0 under the ruled (c) ROT + loop (`.handoff/PROPOSAL-r1.md` section 6: also a full-ring head n/2 lane and a non-full lane); DONE, `test/alloc.mjs` copyTo lanes (LEDGER B4).
 
 STATUS 2026-11-11: step 1 DONE as a research pass (`.handoff/research/r1/`, PRELIMINARY; its strict hold of
 the deciding rungs is PENDING). Ruled (`.handoff/PROPOSAL-r1.md`): Q-R1 = (c) zero allocation at every size
 (full ring + Float32Array dst: `dst.set(data, off)` + `copyWithin` + a loop over the smaller half; else the
-masked loop); Q-R1-SURFACE = a separate allocating `copyToFast(dst, dstOffset)`; Q-R1-ALIAS = fail closed on a
+masked loop; routing as built: a full Float32 ring above 32 samples -> ROT, everything else -> the masked loop); Q-R1-SURFACE = a separate allocating `copyToFast(dst, dstOffset)`; Q-R1-ALIAS = fail closed on a
 `dst` sharing `data`'s buffer (intrinsic `buffer` getter, RangeError); Q-STATHOST = local QUIET, strict.
-Next: the R1 build unit (planner pass on the PROPOSAL).
+
+STATUS 2026-11-12: DONE. R1 build 99e8749 + bench 5ae2266 (`npm run bench:copyto`) + the R1b fix in the working
+tree (Q-R1B-FIX = V-split32c, Q-R1B-ROUTER = loop at <= 32, which amends Q-R1 "`COPY_LOOP_MAX` goes"); reviewer
+APPROVED. Closing `npm run verify` (`.handoff/r1b-fix/evidence/burst-verify.log`, Node v26.8.2, host PRELIMINARY
+load1 4.72 vs baseline 2.21) exit 0, 130 / 130 tests, 1024-sample `copyTo` 0.0-0.2 B/op. Speed (REPORTED from one
+strict A/B, host QUIET, `.handoff/r1b-fix/T5-SUMMARY.md`): vs 1.2.1 at 32 samples 1.33-1.38x slower; at 1024 /
+Float32 contiguous 0.75x, wrapped 3.10x, partial 3.75x (the worst cells), Float64 dst 0.41-0.61x. Docs batch B4
+(README / llms.txt / .d.ts / CHANGELOG / LEDGER / ROADMAP) is in progress. Release 1.3.0 is on HOLD: the
+maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C13, D8-D10 added.
 
 ### R2 -- `pushBatch(src, srcOffset = 0, count = src.length - srcOffset)`
 
@@ -164,9 +173,21 @@ Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of
 Oracle: for every (capacity, head, count, n) in a small matrix, the result equals the last k elements of the
 `copyTo` output.
 
+### B1 -- public comparison benchmark (post-1.3.0, REPORTED only)
+After 1.3.0 ships. One small burst: planner -> coder -> reviewer, then ONE run under `quiet-lock run --strict`.
+(Maintainer-approved 2026-11-12.)
+- Compare against what users would use instead: a plain `Array` ring, a hand-rolled `Float32Array` ring, and
+  lite-o1 `RingDeque`.
+- Operations: push, get / getOrDefault, copyTo (n 32 / 1024) and B/op.
+- Reuse the copyto-ab machinery: A/A twin, SLOW control, B/op lane, K interleaved rounds + IQR, 3 compilations.
+- Dev-only `npm run bench:compare`, not in verify; gates nothing.
+- README gets one table with provenance (date, host, load, Node, run count).
+- Either backs README:179 "roughly 3-5x cheaper" with a REPORTED source, or that claim is removed.
+Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12).
+
 ## Docs-only fillers
 
-- README Ecosystem line: DONE in 1.2.0 (0412025), R1 step 3; the README states the 104 / 208 B per frame.
+- README Ecosystem line: DONE in 1.2.0 (0412025), R1 step 3; the README states the 104 / 208 B per frame; R1 (99e8749) made that line state 0 B (docs batch B4).
 - README / llms.txt NOT FOR ("integers above 2^24"): add the monotonic energy-counter example (Wh totals
   belong in the caller's Float64 columns, not in this ring).
 

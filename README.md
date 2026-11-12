@@ -81,7 +81,7 @@ flowchart LR
         direction TB
         R1["push: 1 store + 1 AND<br/>zero alloc"]
         R2["wrap: head & mask<br/>O(1)"]
-        R3["copyTo: loop (<= 32) or 1-2 memcpys<br/>contiguous oldest-first"]
+        R3["copyTo: masked loop, or set + rotate<br/>for full Float32 rings > 32; 0 B"]
         R1 --> R2 --> R3
     end
 ```
@@ -195,7 +195,7 @@ Once the buffer is full (`count === capacity`), `head` chases the oldest sample 
 
 ### Oldest-first bulk copy
 
-`copyTo(dst, dstOffset)` writes oldest-first. Up to 32 samples it runs a scalar loop, which allocates nothing; above that it uses at most two `TypedArray.set` calls, one per ring half:
+`copyTo(dst, dstOffset)` writes oldest-first and allocates nothing at any size. A full Float32 ring of more than 32 samples takes one `set` + `copyWithin` rotation plus a loop over the smaller ring half; every other copy (up to 32 samples, a partly filled ring, any Float64 `dst`) is a masked scalar loop. The diagram shows the two ring halves a copy has to place:
 
 ```mermaid
 flowchart TB
@@ -207,13 +207,34 @@ flowchart TB
         direction LR
         D0["[0] = data[5]"] --- D1["[1] = data[6]"] --- D2["[2] = data[7]"] --- D3["[3] = data[0]"] --- D4["[4] = data[1]"] --- D5["[5] = data[2]"] --- D6["[6] = data[3]"] --- D7["[7] = data[4]"]
     end
-    R5 -. "copy 1: data[5..8] -> dst[0..3]" .-> D0
-    R0 -. "copy 2: data[0..5] -> dst[3..8]" .-> D3
+    R5 -. "half 1: data[5..8] -> dst[0..3]" .-> D0
+    R0 -. "half 2: data[0..5] -> dst[3..8]" .-> D3
     classDef oldest fill:#882,color:#fff
     classDef newest fill:#288,color:#fff
 ```
 
-`TypedArray.set` from a `subarray` is backed by a memcpy in V8, with no per-element loop in JS land. Each `subarray` view costs 104 B (Node 26.8.2), so the set path allocates 104 B per call contiguous and 208 B wrapped. The scalar loop below 33 samples avoids that; the cutoff of 32 is nominal and its speed relative to memcpy is not yet measured.
+Allocation is DETERMINISTIC and gated: `npm run alloc` (inside `npm run verify`, 2026-11-12, Node v26.8.2 arm64) measures every `copyTo` lane at <= 0.2 B per call against a < 1 B per call gate. The cutoff of 32 (`COPY_LOOP_MAX`) is nominal. A `dst` that shares the ring's ArrayBuffer throws `RangeError` and writes nothing (1.2.1 silently corrupted a wrapped ring); `set` and `copyWithin` are the %TypedArray%.prototype intrinsics, so a `dst` subclass that overrides them cannot change the result. The scalar loop may quiet a signalling-NaN payload.
+
+`copyToFast(dst, dstOffset)` keeps the 1.2.1 copy (at most two `set` calls over `subarray` views, a memcpy each) with identical validation and errors. It allocates 104 B per contiguous call and 208 B per wrapped call (REPORTED: `npm run alloc` lanes `copyToFast 1024, contiguous` / `wrapped`: 104.0 and 208.1 B/op, same run).
+
+Timing is STATISTICAL and REPORTED, not gated (`npm run bench:copyto`, dev-only, strict quiet lock, not in `verify`, not shipped). One strict run 2026-11-12T03:00Z..03:08Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, host QUIET (load1 2.10 at start, 1.36 at end, baseline 2.21), K 21 rounds x 3 compilations = 63 paired ratios per config, median per call vs 1.2.1: at n = 32 every layout is 1.33-1.38x slower (about 11 ns -> 15 ns); at n = 64 and 128 it is faster in every layout (0.24-0.90x); for a Float64 `dst` it is faster at every n >= 64 (0.24-0.61x at the medians); for a Float32 ring it is 1.26-1.30x slower at 256 (wrapped, count n-1) and 3.10x (full, wrapped) / 3.75x (count n-1) slower at 1024. Use `copyToFast` when large wrapped or partly filled Float32 copies are hot and 104 / 208 B per call is acceptable.
+
+| n | dst | layout | 1.2.1 ns | now ns | now / 1.2.1 (median) |
+|---|---|---|---|---|---|
+| 32 | f32 | contig / wrap / part | 10.8 / 10.8 / 10.7 | 14.8 / 14.8 / 14.7 | 1.38 / 1.37 / 1.38 |
+| 32 | f64 | contig / wrap / part | 11.6 / 11.6 / 11.3 | 15.7 / 15.5 / 15.4 | 1.35 / 1.33 / 1.35 |
+| 64 | f32 | contig / wrap / part | 29.3 / 55.1 / 54.7 | 14.8 / 36.9 / 23.8 | 0.51 / 0.67 / 0.44 |
+| 64 | f64 | contig / wrap / part | 65.5 / 98.2 / 108.0 | 26.3 / 26.3 / 25.4 | 0.41 / 0.27 / 0.24 |
+| 128 | f32 | contig / wrap / part | 32.9 / 57.6 / 56.8 | 16.8 / 51.5 / 42.8 | 0.52 / 0.90 / 0.76 |
+| 128 | f64 | contig / wrap / part | 100.1 / 127.5 / 126.3 | 46.7 / 46.7 / 45.5 | 0.47 / 0.37 / 0.36 |
+| 256 | f32 | contig / wrap / part | 35.8 / 61.3 / 63.8 | 21.2 / 79.1 / 80.0 | 0.60 / 1.30 / 1.26 |
+| 256 | f64 | contig / wrap / part | 168.1 / 243.8 / 198.2 | 87.0 / 87.9 / 85.8 | 0.52 / 0.38 / 0.43 |
+| 1024 | f32 | contig / wrap / part | 66.2 / 84.0 / 83.1 | 49.8 / 257.0 / 310.1 | 0.75 / 3.10 / 3.75 |
+| 1024 | f64 | contig / wrap / part | 541.6 / 574.5 / 799.9 | 333.2 / 333.8 / 331.6 | 0.61 / 0.58 / 0.41 |
+
+Layouts: contig = full ring, head 0; wrap = full ring, head n/2; part = count n-1, head n/2. Medians of 63 paired ratios per config; ns are medians per call. The per-config [Q1..Q3] ranges come from `npm run bench:copyto` (run under a strict quiet lock), which prints them. A/A medians were 0.995..1.066 in the 1.2.1 comparison run and 0.973..1.008 in the R1 comparison run (the noise floor to read the ratios against).
+
+Two consequences of the alias-check cache: the ring carries two enumerable own keys, `_bufOf` and `_buf` (they show in `Object.keys`, and `JSON.stringify` of a ring that has copied serializes its storage twice), and a replaced `data` (and its buffer) stays referenced until the next non-empty copy or `destroy()`; `reset()` does not release it. `this.data` is read once per call, before the checks. Validation lives in a shared helper, so an error's stack has two extra frames vs 1.2.1 (the error builder and `copyCheck`); messages are unchanged.
 
 ---
 
@@ -250,7 +271,8 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `peekOldest()` | `number` | Convenience for `getOrDefault(count - 1, 0)`. |
 | `isFull()` | `boolean` | `count === capacity`. |
 | `isEmpty()` | `boolean` | `count === 0`. |
-| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into a `Float32Array` or `Float64Array`. Returns `count`. Throws `TypeError` if `dst` is not a TypedArray (or is a `BigInt64Array` and the buffer is not empty) and `RangeError` if it is too small, writing nothing in either case. |
+| `copyTo(dst, dstOffset?)` | `number` | Write samples oldest-first into a `Float32Array` or `Float64Array`. Returns `count`. Allocates 0 B at every size. Throws `TypeError` if `dst` is not a TypedArray (or is a `BigInt64Array` and the buffer is not empty) and `RangeError` if it is too small or shares the ring's ArrayBuffer, writing nothing in either case. |
+| `copyToFast(dst, dstOffset?)` | `number` | Same result, validation and errors as `copyTo`; copies with at most two `set` calls over `subarray` views, so it allocates 104 B (contiguous) or 208 B (wrapped) per call. Faster than `copyTo` only for a wrapped or partly filled Float32 ring of 256+ samples (`copyTo` / `copyToFast` medians 1.15-1.20x at 256, 2.87-3.47x at 1024, same strict run); slower in every other measured cell. |
 | `forEach(fn)` | `void` | Call `fn(value, index, rb)` for each sample, oldest-first. Zero allocation with a hoisted callback. |
 | `[Symbol.iterator]()` | `Iterator<number>` | `for (const v of rb)` / `[...rb]`, oldest-first. |
 | `reset()` | `void` | Clear the buffer and zero the backing storage. |
@@ -273,7 +295,7 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 - **`tryPush` does not allocate when called without options.** The implementation reads the option object by property access (no destructuring default), so `tryPush(v)` is hot-path-safe just like `push(v)`.
 - **`reset()` zeroes the backing memory.** The library's own reads are bounded by `count` and never see old slots; zeroing protects consumers that read `data` directly. The cost is one `Float32Array.fill(0)` (O(capacity)), which is a single memset in V8.
 - **`destroy()` is final.** It swaps `data` for a shared empty `Float32Array` so the GC can reclaim the backing buffer in long-lived applications. It does not assign `null`: that would widen the `data` field's tracked type in V8 from `Float32Array` to any value for every live instance (seen with `--trace-generalization`, Node 26.8.2). The trade-off: `push`, `tryPush` and `reset` after `destroy()` used to throw a `TypeError` on `null`; now they do nothing, and `tryPush(v)` returns `true` without storing. Reads were already empty. After `destroy()`, the instance is unusable, and nothing tells you so.
-- **Hot-path zero-allocation.** Measured by `npm run alloc` (`test/alloc.mjs`, V8's allocated-bytes counter, 1M calls per window, Node 26.8.2 arm64) in a monomorphic hot loop, with non-integer samples: `push`, `tryPush(v)`, `getOrDefault(i, n)` with a numeric default, `peekNewest`, `peekOldest`, `isFull`, `isEmpty`, `forEach` (with a hoisted callback) and `copyTo` of up to 32 samples allocate 0 B per call. `get(i)` allocates 16 B per call: its `number | undefined` result boxes a non-integer sample, so in a hot loop use `getOrDefault(i, 0)`. `getOrDefault(i)` with no default boxes the same way. `copyTo` of more than 32 samples allocates one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped). Iteration allocates an iterator. These numbers need V8 to inline the call: any call that is not inlined boxes a non-integer double it passes or returns (16 B), which is V8's calling convention, not this library. That inlining precondition is checked by `npm run inline-diff` (REPORTED: run by hand, outside `verify`). `npm test` runs under `--expose-gc` and includes a 1M-push smoke test that checks sub-MB retained heap growth; that test fails (it does not skip) when gc is not exposed.
+- **Hot-path zero-allocation.** Measured by `npm run alloc` (`test/alloc.mjs`, V8's allocated-bytes counter, 1M calls per window, Node 26.8.2 arm64) in a monomorphic hot loop, with non-integer samples: `push`, `tryPush(v)`, `getOrDefault(i, n)` with a numeric default, `peekNewest`, `peekOldest`, `isFull`, `isEmpty`, `forEach` (with a hoisted callback) and `copyTo` at every size allocate 0 B per call (every lane <= 0.2 B per call against the < 1 B gate, `npm run alloc` inside `npm run verify`, 2026-11-12). `get(i)` allocates 16 B per call: its `number | undefined` result boxes a non-integer sample, so in a hot loop use `getOrDefault(i, 0)`. `getOrDefault(i)` with no default boxes the same way. `copyToFast` allocates one 104 B `subarray` view per ring half (104 B contiguous, 208 B wrapped; REPORTED). Iteration allocates an iterator. These numbers need V8 to inline the call: any call that is not inlined boxes a non-integer double it passes or returns (16 B), which is V8's calling convention, not this library. That inlining precondition is checked by `npm run inline-diff` (REPORTED: run by hand, outside `verify`). `npm test` runs under `--expose-gc` and includes a 1M-push smoke test that checks sub-MB retained heap growth; that test fails (it does not skip) when gc is not exposed.
 
 ---
 
@@ -283,9 +305,10 @@ The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_by
 
 | Script | What it runs |
 | --- | --- |
-| `npm test` | `node test/count.mjs`: runs `test/RingBuffer.test.js` (59 tests) and `test/InliningTool.test.js` (31 tests) through `node:test` `run()` under `--expose-gc`, then fails unless exactly 90 tests pass with 0 failed and 0 skipped or todo, one passing run summary and one per-file summary per file, no failed suite and no file with zero tests. An empty, skipped, crashed or early-exiting test file fails. Adding or removing a test updates `EXPECTED` in `test/count.mjs` (a test file: `FILES` too). Extra arguments are read as test files, so `--test-name-pattern` is not passed through. The 1M-push heap smoke test fails (not skips) when gc is not exposed. |
+| `npm test` | `node test/count.mjs`: runs `test/RingBuffer.test.js` (60 tests), `test/InliningTool.test.js` (31), `test/copyto.test.js` (30) and `test/copyto-r1b.test.js` (9) through `node:test` `run()` under `--expose-gc`, then fails unless exactly 130 tests pass with 0 failed and 0 skipped or todo, one passing run summary and one per-file summary per file, no failed suite and no file with zero tests. An empty, skipped, crashed or early-exiting test file fails. Adding or removing a test updates `EXPECTED` in `test/count.mjs` (a test file: `FILES` too). Extra arguments are read as test files, so `--test-name-pattern` is not passed through. The 1M-push heap smoke test fails (not skips) when gc is not exposed. |
 | `npm run inline-diff` | `node test/tools/inline-diff.mjs` (REPORTED: not in `verify`; run it by hand under the quiet lock before each release and in any change to `RingBuffer.js`). Stages the before build (`git show HEAD:RingBuffer.js`; override with `--before FILE` or `--before-ref REF`) and the working-tree file, plus three must-fail controls (copies of the after file whose `getOrDefault`, `peekNewest` or `peekOldest` is padded past V8's default 460-byte max-inlined-bytecode-size), then runs the vendored `test/tools/inlining-budget-diff.sh` with `--fn getOrDefault,peekNewest,peekOldest` on turbo and maglev. Exit 0: the before/after pair is SAME and every control DIFFs, naming only its own function, in every tier. Exit 1: the pair DIFFs, or a control stayed blind ("gate blind"). Exit 2: NO-VERDICT (a run exited 2 or was killed, missing output, staging or option error, no git / bash, or a VERDICT line that disagrees with its run's exit); never read it as a pass. Options: `--after FILE` (default: the working-tree file), `--tiers LIST` (turbo / maglev, default turbo,maglev), `--cap-ms N` (per-run cap, integer 1000..3600000, default 300000; past it the run's process group is SIGKILLed, NO-VERDICT), `--keep`, `--stage-only DIR`. The vendored script is pinned by sha256 in `test/InliningTool.test.js`; the tool's own logic is tested in `npm test` against a stub script, with no real-V8 verdict there. Needs bash and git; a host without them fails `npm test` red. |
 | `npm run alloc` | `test/alloc.mjs`: per-call allocated bytes for every hot method. This is the per-op byte gate. |
+| `npm run bench:copyto` | `node test/bench/copyto-ab.mjs` (dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B of `copyTo` against a before build (default `git show HEAD:RingBuffer.js`), K 21 rounds x 3 compilations, with A/A and must-fail controls. REPORTED only. |
 | `npm run torture` | `test/torture.mjs` (dev-only): lite-leak retention and lite-gc-profiler GC budget (below). |
 | `npm run ascii` | `test/ascii.mjs`: fails on any non-ASCII character in `package.json`, the `files[]` entries and `test/` (U+00D7 and U+00B5 are allowed). |
 | `npm run verify` | `npm test && npm run alloc && npm run torture && npm run ascii` |
@@ -293,8 +316,8 @@ The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_by
 `npm run torture` checks:
 
 - **Retention (lite-leak).** 4096 churned `RingBuffer`s: all 4096 are tracked mid-run (exact count gated) and `tracker.size()` must drain to 0, and the backing `data` of 256 still-live instances is reclaimed after `destroy()`.
-- **GC budget (lite-gc-profiler).** Major 0 / minor 0 collections over 2,000,000 ops on each of 6 lanes: `push` + `tryPush` on a full ring; `getOrDefault` in and out of range; `peekNewest` / `peekOldest` / `isFull` / `isEmpty`; `forEach` over 32; `copyTo` of 32 samples (contiguous and wrapped) into Float32 and Float64; `push` x32 + `reset`. A control lane must collect or the run fails.
-- **Reported, not gated.** `copyTo` of more than 32 samples and `get(i)` allocate by design (the `subarray` views, and the `number | undefined` box).
+- **GC budget (lite-gc-profiler).** Major 0 / minor 0 collections over 2,000,000 ops on each of 6 lanes: `push` + `tryPush` on a full ring; `getOrDefault` in and out of range; `peekNewest` / `peekOldest` / `isFull` / `isEmpty`; `forEach` over 32; `copyTo` of 32 samples (contiguous and wrapped) into Float32 and Float64; `push` x32 + `reset`; and 125,000 ops on a seventh, `copyTo` of 1024 Float32 with the start walking 0..1023. A control lane must collect or the run fails. A second lite-leak tracker follows the backing `ArrayBuffer` of the 256 live instances after one `copyTo` each and requires it to be reclaimed after `destroy()` (the alias-check cache must drop it).
+- **Reported, not gated.** `copyToFast` (the `subarray` views) and `get(i)` (the `number | undefined` box) allocate by design.
 
 GC-count resolution is nominal: torture prints it as `res=` (the CONTROL lane's B/op divided by its minor-GC count) on the GATE line, and it depends on the V8 new-space size, so a gated lane reading minor 0 proves it allocates less than `res` B/op, not 0 B/op. `npm run alloc` is the per-op byte gate.
 
@@ -316,7 +339,7 @@ flowchart LR
     CG --> UI
 ```
 
-`push` allocates nothing, but the read side is not yet allocation-free. `StatsMath` and `CanvasGraph` read the ring through `copyTo` into a capacity-sized scratch, and once the ring holds more than 32 samples each `copyTo` allocates 104 B (contiguous) or 208 B (wrapped). So each stats readout or graph frame allocates 104 B or 208 B (measured by `npm run alloc`, Node 26.8.2 arm64).
+`push` allocates nothing, but the read side is not yet allocation-free. `StatsMath` and `CanvasGraph` read the ring through `copyTo` into a capacity-sized scratch, and `copyTo` now allocates nothing at any size, so this path adds no per-frame allocation from the copy itself (at most 0.2 B per call, `npm run alloc` inside `npm run verify`, 2026-11-12, Node 26.8.2 arm64); whether the consumers' own code allocates is theirs to state.
 
 ---
 
@@ -326,7 +349,7 @@ flowchart LR
 Because `head & mask` is a single instruction; `head % capacity` is a division. The cost difference is invisible on a single call but very real in tight emit loops where `push` is called once per frame *per metric* across dozens of metrics.
 
 **Why `Float32Array` and not `Float64Array`?**
-Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` is a memcpy with no conversion.
+Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` into a Float32Array is a same-type copy with no conversion.
 
 **Can I push integers?**
 Yes -- they'll be implicitly converted to float32 on store, and read back losslessly for any value `|x| < 2^24`. Larger integers will lose precision; for u32 telemetry use a u32-backed sibling library or pack into the 24-bit mantissa.

@@ -332,21 +332,22 @@ describe('RingBuffer -- copyTo', () => {
         assert.deepStrictEqual(Array.from(i32), [3, 4, 5, 6]);
     });
 
-    // A full ring copied into a Float32Array takes the rot path (one intrinsic
-    // set of the storage, then copyWithin + a scalar loop over the smaller ring
-    // half; nothing to rotate at start 0); every other copy, and every
-    // Float64Array copy, takes the masked scalar loop. `path` names the Float32
-    // copy. A wrapped ring is always full (wrapping needs more pushes than
-    // slots), so every wrapped case is rot: start <= n/2 at [64, 80] (start 16),
-    // start > n/2 at the others. The oracle is the pushed sequence itself, not
+    // A full ring of more than 32 samples (COPY_LOOP_MAX) copied into a Float32Array
+    // takes the rot path (one intrinsic set of the storage, then copyWithin + a
+    // scalar loop over the smaller ring half; nothing to rotate at start 0); every
+    // other copy, and every Float64Array copy, takes the masked scalar loop.
+    // `path` names the Float32 copy. A wrapped ring is always full (wrapping
+    // needs more pushes than slots), so every wrapped case with capacity > 32 is
+    // rot: start <= n/2 at [64, 80] (start 16), start > n/2 at [64, 97] (start 33)
+    // and [128, 200] (start 72). The oracle is the pushed sequence itself, not
     // get().
     const cases = [
         // [capacity, pushes, wrapped, path]
         [32, 1, false, 'loop'],
         [32, 31, false, 'loop'],
-        [32, 32, false, 'rot'],
-        [8, 13, true, 'rot'],
-        [32, 49, true, 'rot'],
+        [32, 32, false, 'loop'],
+        [8, 13, true, 'loop'],
+        [32, 49, true, 'loop'],
         [64, 33, false, 'loop'],
         [64, 64, false, 'rot'],
         [64, 80, true, 'rot'],
@@ -363,7 +364,7 @@ describe('RingBuffer -- copyTo', () => {
             const want = seq.slice(seq.length - n);
             assert.strictEqual(rb.count, n);
             assert.strictEqual(((rb.head - rb.count) & rb.mask) + rb.count > rb.capacity, wrapped);
-            assert.strictEqual(n === cap, path === 'rot');
+            assert.strictEqual(n === cap && n > 32, path === 'rot');
 
             const f32 = new Float32Array(n + 3).fill(-1);
             assert.strictEqual(rb.copyTo(f32, 2), n);
