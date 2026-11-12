@@ -134,20 +134,33 @@ function aliasError(name) {
     );
 }
 
+function storageError(name, len, cap) {
+    return new RangeError(
+        'LiteRingBuffer: ' + name + ' storage holds ' + len + ' slots, capacity is ' + cap +
+        ' (data replaced, resized or detached); nothing written'
+    );
+}
+
 /**
  * The shared prologue of `copyTo` and `copyToFast` (so the two validate
  * identically by construction). Checks, in order, all before the first
  * store: TypeError (not a TypedArray), RangeError (bounds), then -- only
- * when count > 0 -- the alias RangeError. Returns count; the caller returns
- * 0 when it is 0. `data` is the array the caller will copy from (read once
- * by the caller), so the alias check covers exactly the copied array.
+ * when count > 0 -- the alias RangeError, then the storage RangeError
+ * (`data`'s length, read through the intrinsic `length` getter, is not
+ * `capacity`: `data` was replaced, resized or detached). Returns count; the
+ * caller returns 0 when it is 0. `data` is the array the caller will copy
+ * from (read once by the caller), so both checks cover exactly the copied
+ * array.
  *
  * `data`'s buffer comes from an identity-keyed cache on the ring (`_bufOf`
  * / `_buf`): re-read through the intrinsic `buffer` getter whenever `data`
  * is not the cached array, and the key is stored only AFTER that read, so a
  * `data` that is not a TypedArray throws the getter's TypeError on every
  * call. A TypedArray's buffer never changes, so the cache cannot go stale.
- * `dst`'s buffer is read through the intrinsic getter on every call.
+ * On a non-extensible ring (frozen, sealed or `Object.preventExtensions`)
+ * the cache is never stored: every miss re-reads the buffer and the ring is
+ * not written. `dst`'s buffer is read through the intrinsic getter on every
+ * call.
  */
 function copyCheck(rb, data, dst, dstOffset, name) {
     // isView alone also admits a DataView, which has no indexed slots or `set`.
@@ -159,13 +172,19 @@ function copyCheck(rb, data, dst, dstOffset, name) {
         throw boundsError(name, c, dstOffset, dlen);
     }
     if (c !== 0) {
+        let buf = rb._buf;
         if (data !== rb._bufOf) {
-            rb._buf = TA_BUFFER.call(data);
-            rb._bufOf = data;
+            buf = TA_BUFFER.call(data);
+            if (Object.isExtensible(rb)) {
+                rb._buf = buf;
+                rb._bufOf = data;
+            }
         }
         // Fail closed: copying a ring into its own storage would overwrite
         // samples before they are read.
-        if (TA_BUFFER.call(dst) === rb._buf) throw aliasError(name);
+        if (TA_BUFFER.call(dst) === buf) throw aliasError(name);
+        const len = TA_LENGTH.call(data);
+        if (len !== rb.capacity) throw storageError(name, len, rb.capacity);
     }
     return c;
 }
@@ -319,9 +338,11 @@ export class RingBuffer {
      *
      * Arguments are checked up front, so a bad call throws without `dst`
      * being partially written. Order: TypeError (not a TypedArray), RangeError
-     * (bounds), return 0 when the ring is empty, RangeError (alias) -- all
-     * before the first store -- then a BigInt `dst` throws TypeError from that
-     * first store. So an aliasing BigInt64Array gets the alias RangeError.
+     * (bounds), return 0 when the ring is empty, RangeError (alias), RangeError
+     * (storage: `this.data` no longer holds `capacity` slots because it was
+     * replaced, resized or detached) -- all before the first store -- then a
+     * BigInt `dst` throws TypeError from that first store. So an aliasing
+     * BigInt64Array gets the alias RangeError.
      * The checks live in a shared helper (`copyCheck`, also used by
      * `copyToFast`): an error's stack has one `copyCheck` frame between the
      * error and this method; the messages are unchanged.
@@ -330,7 +351,12 @@ export class RingBuffer {
      * itself (`_bufOf` / `_buf`, internal). After a caller replaces
      * `this.data`, the cache keeps the replaced array (and its buffer)
      * referenced until the next non-empty `copyTo` / `copyToFast` or
-     * `destroy()`; `reset()` does not release it.
+     * `destroy()`; `reset()` does not release it. A non-extensible ring
+     * (frozen, sealed or `Object.preventExtensions`) stores nothing: each
+     * call re-reads the buffer when `data` is not the cached array. On a
+     * non-extensible ring the keys are never updated: the array cached
+     * before the lock stays referenced until `destroy()`, or for the ring's
+     * lifetime when frozen (`destroy()` cannot write a frozen ring).
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number} [dstOffset=0]
@@ -341,8 +367,10 @@ export class RingBuffer {
      * @throws {RangeError} if `dstOffset` is not a non-negative integer or
      *         `dst` cannot hold `count` samples from `dstOffset`; or, when
      *         count > 0, if `dst` shares the ring's buffer (its ArrayBuffer,
-     *         read through the intrinsic `buffer` getter, is `this.data`'s).
-     *         The alias check runs before the first store, so an aliasing
+     *         read through the intrinsic `buffer` getter, is `this.data`'s);
+     *         or, when count > 0, if `this.data` does not hold `capacity`
+     *         slots (replaced, resized or detached; checked after the alias
+     *         check). Both run before the first store, so an aliasing
      *         BigInt `dst` gets this RangeError, not the TypeError.
      *         Nothing is written.
      */
@@ -353,8 +381,17 @@ export class RingBuffer {
         if (c === 0) return 0;
         const mask = this.mask;
         const start = (this.head - c) & mask;
-        if (c > COPY_LOOP_MAX && c === this.capacity && TA_TAG.call(dst) === 'Float32Array') {
-            rotCopy(dst, data, dstOffset, start, c);
+        // One keyed store site per element family: a site that has seen more than 4 dst
+        // hidden classes goes megamorphic and boxes every non-integer sample (16 B each),
+        // so Float32 and Float64 dsts never share a site with each other or other kinds.
+        const tag = TA_TAG.call(dst);
+        if (tag === 'Float32Array') {
+            if (c > COPY_LOOP_MAX && c === this.capacity) rotCopy(dst, data, dstOffset, start, c);
+            else for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
+            return c;
+        }
+        if (tag === 'Float64Array') {
+            for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
             return c;
         }
         for (let i = 0; i < c; i++) dst[dstOffset + i] = data[(start + i) & mask];
@@ -373,10 +410,12 @@ export class RingBuffer {
      * @param {number} [dstOffset=0]
      * @returns {number} number of samples written (== this.count).
      * @throws {TypeError} as `copyTo`. Nothing is written.
-     * @throws {RangeError} as `copyTo` (bad offset, `dst` too small, or `dst`
-     *         sharing the ring's buffer). The alias check runs before the
-     *         first store, so an aliasing BigInt `dst` gets this RangeError,
-     *         not the TypeError. Nothing is written.
+     * @throws {RangeError} as `copyTo` (bad offset, `dst` too small, `dst`
+     *         sharing the ring's buffer, or `this.data` not holding `capacity`
+     *         slots -- so detached storage is this RangeError, not the
+     *         TypeError `subarray` threw before). The alias and storage checks
+     *         run before the first store, so an aliasing BigInt `dst` gets
+     *         this RangeError, not the TypeError. Nothing is written.
      */
     copyToFast(dst, dstOffset = 0) {
         const data = this.data;

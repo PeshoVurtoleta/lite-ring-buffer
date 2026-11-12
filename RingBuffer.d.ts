@@ -109,10 +109,14 @@ export class RingBuffer implements Iterable<number> {
      *
      * The ring caches its storage's buffer in two own keys (`_bufOf`, `_buf`): a
      * replaced `data` stays referenced until the next non-empty copy or `destroy()`.
+     * On a non-extensible ring the keys are never updated: the array cached before
+     * the lock stays referenced until `destroy()`, or for the ring's lifetime when
+     * frozen (`destroy()` cannot write a frozen ring).
      * `this.data` is read once per call, before the checks (an accessor `data`
      * runs first). Checks run in this order, all before the first store: TypeError (not a
      * TypedArray), RangeError (bounds), return 0 when the ring is empty,
-     * RangeError (alias), then the first store -- so an aliasing BigInt `dst`
+     * RangeError (alias), RangeError (storage: `data` does not hold `capacity`
+     * slots), then the first store -- so an aliasing BigInt `dst`
      * gets the alias RangeError, not a TypeError.
      * @returns number of samples written (== this.count).
      * @throws TypeError if `dst` is not a TypedArray, e.g. an Array or a DataView,
@@ -122,7 +126,9 @@ export class RingBuffer implements Iterable<number> {
      * @throws RangeError if `dstOffset` is not a non-negative integer or
      *         `dst.length < dstOffset + this.count`; or, when count > 0, if
      *         `dst` shares the ring's ArrayBuffer (read through the intrinsic
-     *         `buffer` getter). Nothing is written.
+     *         `buffer` getter), or, when count > 0, if `this.data` does not hold
+     *         exactly `capacity` slots (replaced, resized or detached storage).
+     *         Nothing is written.
      */
     copyTo(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
@@ -136,8 +142,10 @@ export class RingBuffer implements Iterable<number> {
      * nothing.
      * @returns number of samples written (== this.count).
      * @throws TypeError as `copyTo`. Nothing is written.
-     * @throws RangeError as `copyTo` (bad offset, `dst` too small, or `dst`
-     *         sharing the ring's buffer). Nothing is written.
+     * @throws RangeError as `copyTo` (bad offset, `dst` too small, `dst`
+     *         sharing the ring's buffer, or, when count > 0, `this.data` not
+     *         holding exactly `capacity` slots). Detached storage is this
+     *         RangeError, not a TypeError. Nothing is written.
      */
     copyToFast(dst: Float32Array | Float64Array, dstOffset?: number): number;
 

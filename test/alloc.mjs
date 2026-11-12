@@ -29,6 +29,24 @@
  * floored on); the steady state must still be 0. copyToFast (set + subarray,
  * one view per ring half) is REPORTED, never gated.
  *
+ * MEGA lanes (audit 2026-11-12 F1): appended LAST, because they poison
+ * copyTo's feedback for the rest of the process. Before the first MEGA lane
+ * the run loop calls megaPollute(): copyTo into every other element type
+ * (Int8 .. Uint32, + Float16 when defined) + 3 Float64Array subclasses (the
+ * Float64 site then holds 4 maps, still polymorphic; a site shared with
+ * Float32 would hold 5 and box), at 32 and 1023 samples, so a single shared
+ * store site would be megamorphic and box every non-integer sample (~512 B
+ * per 32-sample copy, ~16 kB per 1023). The gated MEGA lanes then copy into
+ * Float32Array / Float64Array and must still read 0: each element family has
+ * its own store site. 'MEGA 1024 F32, full, start 768' guards the rotCopy
+ * path; it passes on 63eb5bc1 too (a guard, not a revert-checked gate).
+ * 'MEGA 32 -> Int16Array' (the megamorphic site itself) is a must-allocate
+ * CONTROL (>= 256 B/op): it fails if the pollution did not happen.
+ * The LAST lane adds 4 Float32Array subclasses and is REPORTED: 5 classes on
+ * the Float32 site is the documented residual (F1b). Self-check: once a MEGA
+ * lane appears every later lane is MEGA, and the subclass lane is last, else
+ * exit 2.
+ *
  * A build without copyToFast: the default target fails closed (exit 2); an
  * explicit build path (revert / must-fail runs on an older build) prints its
  * copyToFast rows as 'n/a' and gates the rest.
@@ -131,10 +149,56 @@ const lanes = [
     ['getOrDefault(i) no default', 'report', () => { const rb = filled(8, 13); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.getOrDefault(i & 7); }; }],
     // Controls: must allocate, or the counter is blind and the gate has no teeth.
     ['CONTROL subarray per op', 'view', () => { const rb = filled(32, 50); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.data.subarray(0, 4); }; }],
+    // MEGA lanes: keep them last (see header). The run loop calls megaPollute() before the first one.
+    ['MEGA 32 F32, wrapped', 0, () => { const rb = filled(32, 50); const out = new Float32Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['MEGA 1023 F32, non-full', 0, () => { const rb = filled(1024, 1023); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['MEGA 1024 -> Float64Array, wrapped', 0, () => { const rb = filled(1024, 1300); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    // rotCopy guard: the full-ring rotate never used the shared site (passes on 63eb5bc1 too).
+    ['MEGA 1024 F32, full, start 768', 0, () => { const rb = filled(1024, 1792); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    ['MEGA 32 -> Int16Array, wrapped', 'mega', () => { const rb = filled(32, 50); const out = new Int16Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    // LAST: 4 Float32Array subclasses + the plain class = 5 on the Float32 site (residual F1b).
+    ['MEGA 32 F32 after 4 F32 subclasses', 'report', () => {
+        const rb = filled(32, 50);
+        const rb2 = filled(1024, 1023);
+        const subs = [class S1 extends Float32Array {}, class S2 extends Float32Array {},
+            class S3 extends Float32Array {}, class S4 extends Float32Array {}];
+        for (const K of subs) {
+            const d = new K(1024);
+            for (let i = 0; i < 400; i++) { rb.copyTo(d); rb2.copyTo(d); }
+        }
+        const out = new Float32Array(32);
+        return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); };
+    }],
 ];
 
+/** Before the first MEGA lane: copyTo into every non-float element type + 3 Float64Array subclasses, 400 calls each at 32 and 1023 samples. */
+function megaPollute() {
+    const kinds = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array];
+    if (typeof globalThis.Float16Array === 'function') kinds.push(globalThis.Float16Array);
+    kinds.push(class P1 extends Float64Array {}, class P2 extends Float64Array {}, class P3 extends Float64Array {});
+    const rb = filled(32, 50);
+    const rb2 = filled(1024, 1023);
+    for (const K of kinds) {
+        const d = new K(1024);
+        for (let i = 0; i < 400; i++) { rb.copyTo(d); rb2.copyTo(d); }
+    }
+}
+
+// The MEGA lanes poison copyTo's feedback for every later lane: they must be the tail, the subclass lane last.
+const megaFirst = lanes.findIndex(([name]) => name.startsWith('MEGA '));
+const megaLast = lanes.length - 1;
+let megaBad = megaFirst < 0 || !lanes[megaLast][0].includes('subclasses');
+for (let i = megaFirst; !megaBad && i <= megaLast; i++) {
+    if (!lanes[i][0].startsWith('MEGA ')) megaBad = true;
+    if (i !== megaLast && lanes[i][0].includes('subclasses')) megaBad = true;
+}
+if (megaBad) {
+    process.stderr.write('alloc: MEGA lanes must be the last lanes, the subclass lane last of all\n');
+    process.exit(2);
+}
+
 // A mistyped label would turn a gated lane into an ungated one.
-const LABELS = [null, 0, 'box16', 'view', 'report'];
+const LABELS = [null, 0, 'box16', 'view', 'report', 'mega'];
 for (const [name, expect] of lanes) {
     if (!LABELS.includes(expect)) {
         process.stderr.write('alloc: lane "' + name + '" has unknown expect label ' + String(expect) + '\n');
@@ -144,7 +208,9 @@ for (const [name, expect] of lanes) {
 
 const rows = [];
 let base = 0;
-for (const [name, expect, make] of lanes) {
+for (let li = 0; li < lanes.length; li++) {
+    const [name, expect, make] = lanes[li];
+    if (li === megaFirst) megaPollute();
     // null make: the method is missing on an explicit (older) build -> 'n/a'.
     if (make === null) { rows.push({ name, expect, net: NaN, first: NaN }); continue; }
     globalThis.gc();
@@ -168,6 +234,7 @@ for (const r of rows) {
     if (r.expect === 0 && !(r.net < 1)) fails.push(r.name + ' allocates ' + fmt(r.net) + ' B/op (want 0)');
     if (r.expect === 'box16' && !(r.net >= 15 && r.net < 17)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want 16): counter is blind');
     if (r.expect === 'view' && !(r.net >= 100)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want >= 100): counter is blind');
+    if (r.expect === 'mega' && !(r.net >= 256)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want >= 256): the pollution did not make the shared site megamorphic');
 }
 if (REPORT) process.exit(0);
 if (fails.length) {
