@@ -43,6 +43,7 @@ Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copy
 - README Companion paragraph no longer says the read side is not allocation-free.
 - README / llms.txt: a finite value with `|x| >= 2^128 - 2^103` (about 3.4e38) stores as +/-Infinity (`push(1e39)` stores `+Infinity` though it passes `v === v`); the docs said only that values round-trip through float32.
 - README Worker FAQ / llms.txt: the claim that the same head/mask discipline works across Workers over a `SharedArrayBuffer` was false (both threads would write `count`); cross-thread use needs a separate SPSC ring with Atomics-published single-writer indices, which this package is not.
+- README integer FAQ: integers with `|x| <= 2^24` read back exactly (it said "any value `|x| < 2^24`", which excluded 2^24 itself and implied fractions are exact); now matches llms.txt.
 
 ### Tests
 
