@@ -10,7 +10,14 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
-Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copyTo` (R1 + R1b) plus tooling and docs. Alloc figures: `npm run alloc` inside `npm run verify`, 2026-11-12, Node v26.8.2 arm64 (DETERMINISTIC, gated). Timing: STATISTICAL, REPORTED only.
+## [1.3.0] - 2026-11-12
+
+`copyTo` allocates 0 B at every size while each of its store sites has seen at most 4 `dst` hidden classes (R1 + R1b + the 2026-11-12 audit fix); new allocating `copyToFast`; a `dst` that aliases the ring, or a ring whose storage was replaced or detached, now throws `RangeError` and writes nothing. Alloc figures: `npm run alloc` inside `npm run verify`, 2026-11-12, Node v26.8.2 arm64 (DETERMINISTIC, gated). Timing: STATISTICAL, REPORTED only.
+
+### Added
+
+- `copyToFast(dst, dstOffset)`: the 1.2.1 `set` + `subarray` copy with identical validation and errors; allocates 104 B (contiguous) / 208 B (wrapped) per call (REPORTED: 104.0 / 208.1 B/op in `npm run alloc`).
+- Dev-only `npm run bench:copyto` (`test/bench/copyto-ab.mjs`; STATISTICAL: strict quiet lock, not in `verify`, not shipped): interleaved before/after `copyTo` A/B with A/A and must-fail controls.
 
 ### Changed
 
@@ -22,11 +29,6 @@ Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copy
 - A frozen, sealed or non-extensible ring copies correctly: the alias-check cache is not stored, so each copy re-reads the buffer. The array cached before the lock stays referenced until `destroy()`, or for the ring's lifetime when frozen.
 - The ring carries two enumerable own keys, `_bufOf` and `_buf` (alias-check cache; they show in `Object.keys`, and `JSON.stringify` of a ring that has copied serializes its storage twice). A replaced `data` (and its buffer) stays referenced until the next non-empty copy or `destroy()`; `reset()` does not release it.
 - Speed vs 1.2.1 (43adb369) of the audit-fix build (c450e686), one strict QUIET run 2026-11-12 (STATISTICAL, REPORTED; Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.74 -> 1.54, baseline 2.21, K 21 x 3 compilations, A/A 0.987..1.014): n = 32 is 1.47-1.52x slower; n = 64 and 128 are faster in every layout; a Float64 `dst` is faster at every n >= 64; Float32 rings are 1.29x (wrapped) / 1.34x (count n-1) slower at 256 and 3.03x (full, wrapped) / 3.85x (count n-1) slower at 1024. Cost of the audit fix against the previous build (63eb5bc1), same day, K 21 x 3, one quiet-lock hold, QUIET at hold start (load1 1.64; 4.40 at this run's start after the hold's earlier steps, 3.99 at end): TIE in 30 of 30 configs, medians 0.99-1.11x. Use `copyToFast` when large wrapped or partly filled Float32 copies are hot and 104 / 208 B per call is acceptable.
-
-### Added
-
-- `copyToFast(dst, dstOffset)`: the 1.2.1 `set` + `subarray` copy with identical validation and errors; allocates 104 B (contiguous) / 208 B (wrapped) per call (REPORTED: 104.0 / 208.1 B/op in `npm run alloc`).
-- Dev-only `npm run bench:copyto` (`test/bench/copyto-ab.mjs`; STATISTICAL: strict quiet lock, not in `verify`, not shipped): interleaved before/after `copyTo` A/B with A/A and must-fail controls.
 
 ### Fixed
 
