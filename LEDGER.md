@@ -15,8 +15,8 @@ count there carries none here either, and says so.
 
 Commits cited: 4dd231b (initial, 2026-06-30), 1a5a294 (1.1.0, 2026-10-08), e3e1df1 (audit fixes +
 alloc gate, 2026-10-14), 0412025 (1.2.0, 2026-10-14), 1d6e368 (unit D, 2026-11-10), b6a8310
-(unit D2, 2026-11-10), 27a8326 (1.2.1, 2026-11-11), dc6965f (unit LU, 2026-11-11), 132d003 (R1 step 1 rulings, 2026-11-11), 99e8749 (R1 build, 2026-11-11), 5ae2266 (bench:copyto, 2026-11-11);
-the R1b fix is in the working tree (uncommitted). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
+(unit D2, 2026-11-10), 27a8326 (1.2.1, 2026-11-11), dc6965f (unit LU, 2026-11-11), 132d003 (R1 step 1 rulings, 2026-11-11), 99e8749 (R1 build, 2026-11-11), 5ae2266 (bench:copyto, 2026-11-11), f66972c (audit fix unit 1, 2026-11-12), 114af66 (unit 2 mutant kills, 2026-11-12);
+the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still named in `.handoff/HISTORY.md`); the maintainer amended it to
 1d6e368 only to drop a trailer (trees identical, `git diff c2c28e0 1d6e368` empty). Not a conflict.
 
 ## How to read this file
@@ -66,8 +66,8 @@ the R1b fix is in the working tree (uncommitted). Unit D was first committed as 
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim about allocation is a claim about every caller path.** "Zero allocation" holds only
-   for the paths the gate lanes cover; `get(i)` allocates and the docs say so (`copyTo` no longer
-   allocates at any size since R1, B4); `copyToFast` allocates by design. *(A1, A11, B2, B4, B5, B6)*
+   for the paths the gate lanes cover; `get(i)` allocates and the docs say so (`copyTo` allocates nothing at any size
+   since R1 only while each store site has seen <= 4 dst classes, B4 / B8); `copyToFast` allocates by design. *(A1, A11, B2, B4, B5, B6, B8)*
 8. **General O(1) structures belong to lite-o1; this package is the Float32 telemetry ring** that
    feeds lite-canvas-graph and lite-stats-math. A feature that does not serve that pipeline is
    refused. *(A1, A2, A3, A4, A5)*
@@ -388,6 +388,60 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (RangeError, Q-F1: `copyToFast` too). Cost: an aliasing call that was correct in 1.2.1 (a contiguous ring,
   non-overlapping view) now throws.
 
+### B8. `copyTo` boxed every sample once the process had copied into more than 4 dst kinds (O6 = F1, audit 2026-11-12)
+
+- **What happened.** The dual blind audit (2026-11-12) found that `copyTo`'s one masked-loop store site went
+  megamorphic once the process had copied into more than 4 distinct dst hidden classes, and then boxed every
+  non-integer sample: one 16 B HeapNumber each, about 16 KB per 1000-sample call (R1b build 63eb5bc1, which
+  documented "0 B at every size"). The alloc gate saw only 1-2 dst kinds. Fix (unit 1, ruling Q-AUD-1,
+  commit f66972c, build c450e686): one store site per dst family (Float32Array: `rotCopy` for a full ring above
+  32 samples, else its own loop; Float64Array; every other kind); bytecode copyTo 189 -> 288 B, copyCheck 191 ->
+  257 B, rotCopy 192 B, all under the 460 B inline limit (D9 / D10). Residual, documented as such: 5 or more
+  classes of ONE element type (e.g. Float32Array subclasses) still box; `copyToFast` is unaffected. Docs now
+  scope every "allocates nothing" for `copyTo` to "at most 4 dst hidden classes per store site, Node 26.8.2 arm64".
+- **Root cause.** One keyed-store site shared by every dst kind; an IC site has a polymorphism budget of 4 maps and
+  a megamorphic keyed store boxes a double (zero-box law; law 7: a doc claim about allocation is a claim about
+  every caller path). The gate exercised too few dst kinds to see it (law 1).
+- **Evidence.** `audit/2026-11-12/TRIAGE.md` (O6 = F1, Q-AUD-1), `audit/2026-11-12/fable-5.2_FINDINGS.md` F1,
+  `audit/2026-11-12/opus-5.5_FINDINGS.md` O6; frozen before 63eb5bc1 (`.handoff/audit-fix/frozen/`), after
+  c450e686 (commit f66972c). `npm run alloc` MEGA lanes, B/op (net of baseline; `.handoff/audit-fix/evidence/r2-alloc-new.log` / `r2-alloc-frozen.log`, 2026-11-12, Node v26.8.2 arm64, load1 2.79 per `r2-alloc-provenance.log`, one run each): new -0.1..0.2 on the gated
+  lanes vs 511.9 / 16368.1 / 16384.1 on 63eb5bc1; the Int16 'mega' control 512.0; the Float32-subclass residual
+  512.0 (REPORTED, not gated). `.handoff/audit-fix/U3-SUMMARY.md` (2026-11-12, Node v26.8.2, Apple M4 Pro, QUIET,
+  `--strict`): torture exit 0; inline-diff 63eb5bc1 vs c450e686 SAME with 3/3 controls DIFF; T5 fix cost vs
+  63eb5bc1 a TIE in 30/30 configs, medians 0.99-1.11x (K=21 rounds x 3 compilations; STATISTICAL, local).
+  `.handoff/audit-fix/review-u1-r1.md`: round 1 REJECTED (4 LITERAL), two of them teeth gaps: the Float32 /
+  Float64 split was ungated (surviving mutant M5: one loop shared by both) and the pollution was not proven
+  in-run (reordered pollution; no proof the site went megamorphic). Fixed: 3 Float64Array subclasses in the
+  pollution, pollution at the first MEGA lane inside the run loop, and the Int16 lane became a must-allocate
+  'mega' control (>= 256 B/op). Review r1 mutants caught: M1 M2 M3 M4 M6 M8 M10 M12; M13 equivalent.
+- **Law.** 1, 3, 4, 7 (and zero-box).
+- **Gate.** `test/alloc.mjs` MEGA lanes (`MEGA 32 F32, wrapped`, `MEGA 1023 F32, non-full`, `MEGA 1024 ->
+  Float64Array, wrapped`, `MEGA 1024 F32, full, start 768`, and the `MEGA 32 -> Int16Array, wrapped` 'mega'
+  must-allocate control; the self-check orders them last). Re-opens if a fourth store site is needed, if
+  copyTo / copyCheck bytecode passes 460 B, or if a fix for the 5+ same-element-type residual is proposed: it
+  must clear every MEGA lane, `inline-diff` and T5.
+
+### B9. `copyTo` trusted `data.length === capacity`; a frozen ring threw (O1 + F5 + O2, audit 2026-11-12)
+
+- **What happened.** O1: ring storage detached (e.g. `rb.data.buffer` transferred to a Worker) made `copyTo` write
+  NaN for every sample and return `count` (1.2.1 threw a TypeError above 32 samples). F5: a longer replaced
+  `data` made the rotate write past `count`. O2: a frozen / sealed ring made `copyTo` / `copyToFast` throw
+  "Cannot assign to read only property '_buf'" because the buffer cache write was unconditional (1.2.1 copied).
+  Fix (unit 1, ruling Q-AUD-2, f66972c): `copyCheck` throws a RangeError ("storage holds N slots, capacity ...")
+  when count > 0 and `data` does not hold exactly `capacity` slots (read through the intrinsic `length`);
+  `copyToFast` on detached storage is that RangeError, not a V8 TypeError; the cache is not stored on a
+  non-extensible ring (the array cached before the lock stays referenced until `destroy()`, or for the ring's
+  lifetime when frozen). Check order: TypeError, bounds RangeError, return 0 on empty, alias RangeError, storage
+  RangeError, first store. Review nit M7 (`data.length` instead of the intrinsic) was pinned in unit 2.
+- **Root cause.** A fail-open: the loop trusted an invariant (`data.length === capacity`) nothing re-verified
+  (law 2); a cache write placed before the guard that could refuse it.
+- **Evidence.** `audit/2026-11-12/TRIAGE.md` (O1 + F5, O2, Q-AUD-2); both FINDINGS files; build 63eb5bc1 ->
+  c450e686 (commit f66972c); `.handoff/audit-fix/review-u1-r1.md`.
+- **Law.** 1, 2.
+- **Gate.** `test/audit-fix.test.js` (storage RangeError, detached `copyToFast`, frozen / sealed ring cases) and
+  `test/mutant-kills.test.js` (M7 pin). Re-opens if `data` is allowed to be anything other than a Float32Array of
+  exactly `capacity` slots, or if the cache write moves before the checks.
+
 ---
 
 ## C. Gate evolution (gates that had to be given teeth)
@@ -587,6 +641,24 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   burst 2.
 - **Law.** 1, 2.
 - **Gate.** `test/bench/copyto-ab.mjs --self-test` (the two NaN-round rows; run by hand, 52 / 52 at approval).
+
+### C14. 13 engine mutants (F4's 12, O4 among them, + review M7) survived every test (F4 / O4, audit 2026-11-12)
+
+- **What happened.** Fable's F4 hand-built 12 engine mutants (e.g. `isEmpty`, `isFull`, peek-on-empty NaN,
+  `tryPush({})`, `copyToFast` default offset, capacity 0.5, the rotate branch choice) that passed all 99 engine
+  tests; Opus's O4 (`!options.overwrite`, which makes `tryPush(v, {})` refuse) is one of them, and review nit M7
+  (`data.length` instead of the intrinsic length) survived too. Unit 2 (ruling Q-AUD-4, commit 114af66) added
+  `test/mutant-kills.test.js` (8 tests); 13 of 13 mutants are killed, each by a test that fails on the mutated
+  engine.
+- **Root cause.** Tests asserted the behavior the author had in mind, not every observable contract of the
+  small methods; no mutation pass had ever been run over the engine (law 1).
+- **Evidence.** `audit/2026-11-12/TRIAGE.md` (O4 + F4, Q-AUD-4); `audit/2026-11-12/fable-5.2_FINDINGS.md` F4 and
+  `fable-5.2_reproductions.mjs`; `audit/2026-11-12/opus-5.5_FINDINGS.md` O4. The audit itself: dual blind audit,
+  2026-11-12, Opus 5.5 (high) and Fable 5.2 (xhigh), TRIAGE and rulings Q-AUD-1..4 in
+  `audit/2026-11-12/TRIAGE.md`; audited build 63eb5bc1, fixed build c450e686.
+- **Law.** 1.
+- **Gate.** `test/mutant-kills.test.js` (13 mutants, 8 tests; counted by `test/count.mjs`). Re-opens if any
+  engine method gains a branch with no test that fails when that branch is mutated.
 
 ---
 

@@ -5,8 +5,8 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
 Baseline: 1.2.1 (prepared 2026-11-11: units D / D2 tooling + docs and LEDGER.md over 1.2.0, no runtime
-change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 is built (99e8749, bench 5ae2266, R1b fix in the working tree; release 1.3.0 is the maintainer's call): `copyTo`
-allocates 0 B at every size and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
+change). 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 is built (99e8749, bench 5ae2266, R1b fix 7b0f74b, audit fix f66972c / 114af66; release 1.3.0 is the maintainer's call): `copyTo`
+allocates 0 B at every size while each of its three store sites has seen at most 4 `dst` hidden classes (LEDGER B8) and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
 after Q-R1B-ROUTER). R2 is still open: there is no `pushBatch`.
 
 Scope trimmed 2026-11-10 (maintainer). lite-o1 `RingLog` / `RingDeque` do NOT supersede this package (see

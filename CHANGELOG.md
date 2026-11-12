@@ -14,12 +14,14 @@ Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copy
 
 ### Changed
 
-- `copyTo` allocates 0 B at every size (1.2.1: scalar loop up to 32 samples, `set` over two `subarray` views above, 104 B contiguous / 208 B wrapped). Every `copyTo` lane in `npm run alloc` is <= 0.2 B per call against the < 1 B gate.
+- `copyTo` allocates 0 B at every size (1.2.1: scalar loop up to 32 samples, `set` over two `subarray` views above, 104 B contiguous / 208 B wrapped), with one residual: each of its three store sites (Float32Array `dst`, Float64Array `dst`, every other element type) allocates nothing until it has seen more than 4 distinct `dst` hidden classes in the process (each subclass, realm and resizable-buffer variant counts as one); past that the site boxes every non-integer sample (16 B each, Node 26.8.2 arm64). `copyToFast` is unaffected. Every gated `copyTo` lane in `npm run alloc` (MEGA lanes included) is <= 0.2 B per call against the < 1 B gate; the MEGA lanes gate the family split and an Int16 must-allocate control, and REPORT the residual (5 Float32Array classes, ~512 B per 32-sample call, not gated). A small (<= 64 B) on-heap `dst` has its ArrayBuffer materialized once by the alias check (about 32-61 B off-heap per fresh small `dst`, REPORTED).
 - `copyTo` uses the %TypedArray%.prototype `set` / `copyWithin` / `buffer` intrinsics, so a `dst` subclass that overrides them no longer changes the result.
 - Full Float32 rings of <= 32 samples take the masked loop; only above 32 (`COPY_LOOP_MAX = 32`, nominal) a full Float32 ring takes `set` + `copyWithin` rotation plus a loop over the smaller half. The loop may quiet a signalling-NaN payload.
 - Validation moved into a shared helper (`copyCheck`, used by `copyTo` and `copyToFast`): error stacks gain two frames vs 1.2.1 (the error builder and `copyCheck`); messages are unchanged. `this.data` is read once per call, before the checks.
+- `copyTo` / `copyToFast` throw a new storage `RangeError` (only when count > 0, after the alias check) when `this.data` no longer holds `capacity` slots (replaced, resized or detached); `copyToFast` on detached storage was a V8 `TypeError` before. Nothing is written.
+- A frozen, sealed or non-extensible ring copies correctly: the alias-check cache is not stored, so each copy re-reads the buffer. The array cached before the lock stays referenced until `destroy()`, or for the ring's lifetime when frozen.
 - The ring carries two enumerable own keys, `_bufOf` and `_buf` (alias-check cache; they show in `Object.keys`, and `JSON.stringify` of a ring that has copied serializes its storage twice). A replaced `data` (and its buffer) stays referenced until the next non-empty copy or `destroy()`; `reset()` does not release it.
-- Speed vs 1.2.1, one strict QUIET run 2026-11-12 (Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.10 -> 1.36, baseline 2.21, K 21 x 3 compilations): n = 32 is 1.33-1.38x slower; n = 64 and 128 are faster in every layout; a Float64 `dst` is faster at every n >= 64; Float32 rings are 1.26-1.30x slower at 256 (wrapped, count n-1) and 3.10x (full, wrapped) / 3.75x (count n-1) slower at 1024. Use `copyToFast` when large wrapped or partly filled Float32 copies are hot and 104 / 208 B per call is acceptable.
+- Speed vs 1.2.1 (43adb369) of the audit-fix build (c450e686), one strict QUIET run 2026-11-12 (STATISTICAL, REPORTED; Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.74 -> 1.54, baseline 2.21, K 21 x 3 compilations, A/A 0.987..1.014): n = 32 is 1.47-1.52x slower; n = 64 and 128 are faster in every layout; a Float64 `dst` is faster at every n >= 64; Float32 rings are 1.29x (wrapped) / 1.34x (count n-1) slower at 256 and 3.03x (full, wrapped) / 3.85x (count n-1) slower at 1024. Cost of the audit fix against the previous build (63eb5bc1), same day, K 21 x 3, one quiet-lock hold, QUIET at hold start (load1 1.64; 4.40 at this run's start after the hold's earlier steps, 3.99 at end): TIE in 30 of 30 configs, medians 0.99-1.11x. Use `copyToFast` when large wrapped or partly filled Float32 copies are hot and 104 / 208 B per call is acceptable.
 
 ### Added
 
@@ -28,11 +30,21 @@ Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copy
 
 ### Fixed
 
+- An aliasing BigInt64Array / BigUint64Array `dst` gets the alias `RangeError` (the alias and storage checks run before the first store); a non-aliasing one still gets the `TypeError`.
 - A `dst` sharing the ring's ArrayBuffer made `copyTo` silently corrupt a wrapped ring; it now throws `RangeError` and writes nothing.
+
+### Docs
+
+- `forEach`: "zero allocation with a hoisted callback" holds for ONE callback function per process; a second distinct callback boxes (about 128 B per 8-sample call, REPORTED from the 2026-11-12 audit).
+- `push` / `tryPush` coerce like a typed-array store: `null`, `''`, `[]` store 0; `undefined` stores NaN; map missing readings to NaN yourself.
+- A null-prototype object or an object with a throwing `toString` as capacity or `dstOffset` throws `TypeError` / the user's error, not the documented `RangeError` (a Symbol, BigInt or plain object still gets the `RangeError`).
+- `ceilPow2`: a finite `n` in (-2^31, 0] gives 2^32; at or below -2^31 the uint32 wrap decides (`ceilPow2(-(2 ** 31)) === 2 ** 31`).
+- The alias check is ArrayBuffer identity: two SharedArrayBuffer objects over one memory block are not detected.
+- README Companion paragraph no longer says the read side is not allocation-free.
 
 ### Tests
 
-- `npm test` count 90 -> 130: `test/RingBuffer.test.js` 60, `test/InliningTool.test.js` 31, new `test/copyto.test.js` 30 and `test/copyto-r1b.test.js` 9 (`EXPECTED` and `FILES` in `test/count.mjs`). New lanes cover alias, overriding-subclass, validation and full-ring parity cases for `copyTo` / `copyToFast`.
+- `npm test` count 90 -> 148: `test/RingBuffer.test.js` 60, `test/InliningTool.test.js` 31, new `test/copyto.test.js` 30, `test/copyto-r1b.test.js` 9, `test/audit-fix.test.js` 10 and `test/mutant-kills.test.js` 8 (`EXPECTED` and `FILES` in `test/count.mjs`). The new files cover the storage error, frozen / sealed rings and 13 engine mutants. New lanes cover alias, overriding-subclass, validation and full-ring parity cases for `copyTo` / `copyToFast`.
 - `npm run torture` gains a gated `copyTo` 1024 Float32 lane (start walks 0..1023) and a buffer tracker: the backing `ArrayBuffer` of 256 live instances is reclaimed after `destroy()`.
 - New `npm run inline-diff` (`test/tools/inline-diff.mjs`, REPORTED tier: not in `verify`, run by hand under the quiet lock before each release and in any unit that edits `RingBuffer.js`). It stages `git show HEAD:RingBuffer.js` (or `--before FILE` / `--before-ref REF`) and the working-tree file, plus three must-fail controls (copies whose `getOrDefault`, `peekNewest` or `peekOldest` is padded past V8's default 460-byte max-inlined-bytecode-size), and runs the vendored script with `--fn getOrDefault,peekNewest,peekOldest` on turbo and maglev. Exit 0 = A/A SAME and every control DIFF naming only its own function in every tier; 1 = A/A DIFF or a blind control; 2 = NO-VERDICT.
 - New `test/InliningTool.test.js` (31 tests, in `npm test`): vendored-script sha pin and its teeth, the script's `--self-test`, five script mutants that must go red plus a driver-exit mutant caught against real V8, and the `inline-diff.mjs` verdict / fail-closed rows against a stub script. A missing bash, git or node fails red; nothing skips.

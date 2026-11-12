@@ -5,7 +5,8 @@ export declare const MAX_CAPACITY: number;
  * Smallest power of two >= n, for an integer n in [1, 2^32].
  * `ceilPow2(1) === 1`. Inputs are not validated: a fraction above 1 behaves
  * as `Math.floor(n)` (`ceilPow2(1.5) === 1`); `0 < n < 1`, NaN and +/-Infinity
- * give 1; a finite `n <= 0` gives 2^32; `n > 2^32` wraps mod 2^32.
+ * give 1; a finite `n` with -2^31 < n <= 0 gives 2^32 (at or below -2^31 the
+ * uint32 wrap of `n - 1` decides: `ceilPow2(-(2 ** 31)) === 2 ** 31`, `ceilPow2(-1e300) === 1`); `n > 2^32` wraps mod 2^32.
  */
 export declare function ceilPow2(n: number): number;
 
@@ -49,12 +50,18 @@ export class RingBuffer implements Iterable<number> {
     /**
      * @param requestedCapacity minimum capacity in [1, 2^31]; rounded up to next power of two. Defaults to 1024.
      * @throws RangeError if requestedCapacity is not a number in [1, 2^31].
+     * @throws TypeError (or the user's own error) if requestedCapacity cannot be
+     *         turned into text for the message: a null-prototype object, or an
+     *         object whose `toString` throws. A Symbol or BigInt gets the RangeError.
      */
     constructor(requestedCapacity?: number);
 
     /**
      * Push a sample. Always succeeds; oldest sample is overwritten when full.
      * Zero allocation. Hot-path safe.
+     *
+     * The value is coerced like a typed-array store: `null`, `''` and `[]`
+     * store 0; `undefined` stores NaN. Map a missing reading to NaN yourself.
      */
     push(value: number): void;
 
@@ -62,7 +69,8 @@ export class RingBuffer implements Iterable<number> {
      * Push with control. When `options.overwrite` is `false` and the buffer
      * is full, returns `false` and discards the new sample.
      * Reads `options` by property access so a missing argument does not
-     * allocate a fresh object.
+     * allocate a fresh object. `value` is coerced as in {@link push}
+     * (`null` -> 0, `undefined` -> NaN).
      *
      * @returns `true` if the sample was stored.
      */
@@ -98,9 +106,14 @@ export class RingBuffer implements Iterable<number> {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
-     * Allocates nothing at any size in steady state (gated by `npm run alloc`);
-     * the first alias check on an on-heap (<= 64 B) ring or `dst` materializes
-     * its ArrayBuffer once. A full ring of more than 32 samples into a
+     * Allocates nothing in steady state while each of its three store sites
+     * (Float32Array `dst`, Float64Array `dst`, every other element type) has
+     * seen at most 4 distinct `dst` hidden classes in the process; each subclass,
+     * realm and resizable-buffer variant counts as one. Past that, the site boxes
+     * every non-integer sample (one HeapNumber per sample, 16 B on Node 26.8.2
+     * arm64). `copyToFast` is unaffected. The `npm run alloc` MEGA lanes gate the family split and REPORT the 5-class residual.
+     * The first alias check on an on-heap (<= 64 B) ring or `dst` materializes
+     * its ArrayBuffer once (about 32-61 B off-heap per fresh small `dst`, REPORTED: audit and review runs, Node 26.8.2 arm64). A full ring of more than 32 samples into a
      * Float32Array is one intrinsic `set` + `copyWithin` rotation plus a scalar
      * loop over the smaller ring half; every other copy, including every copy
      * of at most 32 samples, is a scalar loop. `set`, `copyWithin`, `buffer` and
@@ -128,7 +141,14 @@ export class RingBuffer implements Iterable<number> {
      *         `dst` shares the ring's ArrayBuffer (read through the intrinsic
      *         `buffer` getter), or, when count > 0, if `this.data` does not hold
      *         exactly `capacity` slots (replaced, resized or detached storage).
-     *         Nothing is written.
+     *         Nothing is written. An aliasing BigInt64Array / BigUint64Array
+     *         `dst` gets this alias RangeError, not the TypeError.
+     * @throws TypeError (or the user's own error) if `dstOffset` is a
+     *         null-prototype object or its `toString` throws, since the message
+     *         cannot be built; a Symbol or BigInt `dstOffset` gets the RangeError.
+     *         The alias check compares ArrayBuffer identity: two
+     *         SharedArrayBuffer objects over the same memory pass it (reachable
+     *         only after a caller replaces `data`).
      */
     copyTo(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
@@ -138,8 +158,8 @@ export class RingBuffer implements Iterable<number> {
      * at most two intrinsic `set` calls over `subarray` views, one per ring
      * half, so it ALLOCATES: 104 B per contiguous call, 208 B per wrapped call
      * (`npm run alloc` lanes `copyToFast 1024, contiguous` / `wrapped`,
-     * Node 26.8.2 arm64). Not for a zero-GC hot path; `copyTo` allocates
-     * nothing.
+     * Node 26.8.2 arm64). Not for a zero-GC hot path; `copyTo` is the zero-allocation
+     * form (see {@link copyTo} for its residual).
      * @returns number of samples written (== this.count).
      * @throws TypeError as `copyTo`. Nothing is written.
      * @throws RangeError as `copyTo` (bad offset, `dst` too small, `dst`
@@ -149,7 +169,11 @@ export class RingBuffer implements Iterable<number> {
      */
     copyToFast(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
-    /** Visit live samples oldest -> newest. Zero allocation with a hoisted callback. */
+    /**
+     * Visit live samples oldest -> newest. Zero allocation with a hoisted
+     * callback, for ONE callback function per process: a second distinct
+     * callback costs about 128 B per 8-sample call (REPORTED, audit 2026-11-12).
+     */
     forEach(fn: (value: number, index: number, rb: RingBuffer) => void): void;
 
     /** Iterate live samples oldest -> newest. */

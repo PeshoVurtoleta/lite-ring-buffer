@@ -9,6 +9,10 @@
  *  - Stores Float32 samples. Callers SHOULD push only finite numbers;
  *    NaN/Infinity will round-trip correctly but corrupt downstream stats
  *    unless those consumers filter them.
+ *  - `push` / `tryPush` do not validate the value; the typed-array store
+ *    coerces it: `push(null)`, `push('')` and `push([])` store 0,
+ *    `push(undefined)` stores NaN. null is not zero: map a missing reading
+ *    to NaN yourself.
  *  - `requestedCapacity` is rounded up; the original request is preserved
  *    on `.requestedCapacity` and the actual storage size on `.capacity`.
  *  - Methods are NOT safe to call after `destroy()`.
@@ -42,7 +46,9 @@ export const MAX_CAPACITY = 0x80000000; // 2^31
  *  - a fraction above 1 behaves as `Math.floor(n)`, so the result can be below
  *    n: `ceilPow2(1.5) === 1`, `ceilPow2(2.5) === 2`;
  *  - `0 < n < 1` gives 1 (`n - 1` truncates to 0);
- *  - a finite `n <= 0` gives 2^32 (`clz32(-1) === 0`);
+ *  - a finite `n` in (-2^31, 0] gives 2^32 (`clz32(-1) === 0`); at or below
+ *    -2^31 the uint32 wrap of `n - 1` decides: `ceilPow2(-(2 ** 31)) === 2 ** 31`,
+ *    `ceilPow2(-1e300) === 1`;
  *  - NaN and +/-Infinity give 1 (they convert to 0);
  *  - `n > 2^32` wraps: `ceilPow2(2 ** 32 + 1) === 1`, `ceilPow2(2 ** 33) === 2 ** 32`.
  * The RingBuffer constructor floors and range-checks before calling it.
@@ -161,6 +167,13 @@ function storageError(name, len, cap) {
  * the cache is never stored: every miss re-reads the buffer and the ring is
  * not written. `dst`'s buffer is read through the intrinsic getter on every
  * call.
+ *
+ * The alias check is ArrayBuffer IDENTITY. Two SharedArrayBuffer objects over
+ * one memory block (a structuredClone / postMessage copy of a
+ * SharedArrayBuffer, a shared WebAssembly.Memory after grow) are different
+ * objects and are not detected. The constructor never builds such storage;
+ * only a caller that replaced `data` with a view of shared memory can reach
+ * this.
  */
 function copyCheck(rb, data, dst, dstOffset, name) {
     // isView alone also admits a DataView, which has no indexed slots or `set`.
@@ -214,6 +227,11 @@ export class RingBuffer {
      * @param {number} [requestedCapacity=1024] minimum capacity in [1, 2^31];
      *        fractions are floored, then rounded up to the next power of two.
      * @throws {RangeError} if requestedCapacity is not a number in [1, 2^31].
+     *         Exception: the error message is built with `String(x)`, so an
+     *         object that `String()` cannot convert throws while the message is
+     *         built: a null-prototype object gives a TypeError, an object
+     *         whose `toString` / `Symbol.toPrimitive` throws gives that error
+     *         (and a user `toString` runs). Nothing is constructed either way.
      */
     constructor(requestedCapacity = 1024) {
         // Number.isFinite never coerces, so strings/BigInts/Symbols are rejected here.
@@ -252,6 +270,10 @@ export class RingBuffer {
     /**
      * Push a sample. Always succeeds; oldest sample is overwritten when full.
      * Zero allocation. Hot-path safe.
+     *
+     * `value` is not validated; the Float32Array store coerces it (`tryPush`
+     * too): `push(null)`, `push('')` and `push([])` store 0, `push(undefined)`
+     * stores NaN. null is not zero: map a missing reading to NaN yourself.
      * @param {number} value
      */
     push(value) {
@@ -323,7 +345,25 @@ export class RingBuffer {
 
     /**
      * Bulk contiguous copy into `dst` starting at `dstOffset`, oldest-first.
-     * Allocates nothing, at any count.
+     * Allocates nothing, at any count, while V8 keeps the loop's stores typed:
+     * each of the three store sites below (a Float32Array `dst`, a Float64Array
+     * `dst`, every other element type) allocates nothing until it has seen
+     * more than 4 distinct `dst` hidden classes in the process (each subclass,
+     * each realm and each resizable-buffer variant counts as one). Past that
+     * the site is megamorphic and boxes every non-integer sample: one
+     * HeapNumber per sample, 16 B on Node 26.8.2 arm64. `copyToFast` is
+     * unaffected. The `npm run alloc` MEGA lanes gate the split (Float32 and
+     * Float64 `dst` stay at 0 B after every other element type has been
+     * copied into) and REPORT the residual (5 Float32Array classes on the
+     * Float32 site).
+     *
+     * Steady state only: the alias check reads `dst`'s buffer through the
+     * intrinsic getter, which materializes an off-heap ArrayBuffer (a backing
+     * store of `dst.byteLength`) the first time it is read on an on-heap
+     * (<= 64 B) `dst` -- once per array, so a fresh small `dst` per call
+     * allocates a backing store on every call (hoist it). The ring's own
+     * storage (capacity <= 16) is materialized the same way on its first
+     * non-empty copy.
      *
      * A full ring of more than 32 samples (COPY_LOOP_MAX) copied into a
      * Float32Array (a subclass counts; the type is read through the intrinsic
@@ -365,7 +405,12 @@ export class RingBuffer {
      *         too), or is a BigInt64Array / BigUint64Array and count > 0.
      *         Nothing is written.
      * @throws {RangeError} if `dstOffset` is not a non-negative integer or
-     *         `dst` cannot hold `count` samples from `dstOffset`; or, when
+     *         `dst` cannot hold `count` samples from `dstOffset` (a Symbol
+     *         or BigInt `dstOffset` included; but the message is built with
+     *         `String(dstOffset)`, so a null-prototype object `dstOffset`
+     *         throws a TypeError, and one whose `toString` /
+     *         `Symbol.toPrimitive` throws gives that error, a user `toString`
+     *         having run; empty ring too, nothing written); or, when
      *         count > 0, if `dst` shares the ring's buffer (its ArrayBuffer,
      *         read through the intrinsic `buffer` getter, is `this.data`'s);
      *         or, when count > 0, if `this.data` does not hold `capacity`
@@ -382,8 +427,11 @@ export class RingBuffer {
         const mask = this.mask;
         const start = (this.head - c) & mask;
         // One keyed store site per element family: a site that has seen more than 4 dst
-        // hidden classes goes megamorphic and boxes every non-integer sample (16 B each),
-        // so Float32 and Float64 dsts never share a site with each other or other kinds.
+        // hidden classes goes megamorphic and boxes every non-integer sample (one
+        // HeapNumber per sample, 16 B on Node 26.8.2 arm64), so Float32 and Float64 dsts
+        // never share a site with each other or other kinds. Each site can still go
+        // megamorphic on its own (5+ subclasses / realms / resizable variants of one
+        // family; REPORTED by the last `npm run alloc` MEGA lane). copyToFast has no such site.
         const tag = TA_TAG.call(dst);
         if (tag === 'Float32Array') {
             if (c > COPY_LOOP_MAX && c === this.capacity) rotCopy(dst, data, dstOffset, start, c);
@@ -404,7 +452,10 @@ export class RingBuffer {
      * intrinsic `set` calls over `subarray` views, one per ring half, so it
      * allocates: one view per ring half (104 B for a contiguous copy, 208 B
      * wrapped: `npm run alloc` lanes `copyToFast 1024, contiguous` /
-     * `wrapped`, Node 26.8.2 arm64). `copyTo` allocates nothing.
+     * `wrapped`, Node 26.8.2 arm64). `copyTo` allocates nothing (within V8's
+     * 4-class limit per store site; see `copyTo`). Having no per-sample store
+     * site, `copyToFast` never boxes a sample, however many `dst` classes the
+     * process uses.
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number} [dstOffset=0]
@@ -431,7 +482,17 @@ export class RingBuffer {
     }
 
     /**
-     * Visit live samples OLDEST -> NEWEST. Zero allocation with a hoisted callback.
+     * Visit live samples OLDEST -> NEWEST. Allocates nothing only while V8
+     * inlines `fn` into this loop, which holds for ONE callback function per
+     * process. The `fn(...)` call site below is shared by every ring: once a
+     * second distinct callback function has been passed to any `forEach`, the
+     * site is megamorphic, and a callback that is not a compile-time constant
+     * inside an optimized caller (one passed through a parameter or a
+     * property, or a function declaration) is called, not inlined. Every
+     * non-integer sample is then boxed (16 B per sample, Node 26.8.2 arm64;
+     * ~128 B per 8-sample call, REPORTED from the 2026-11-12 audit). With more
+     * than one consumer, read through `copyTo`, or `getOrDefault(i, 0)` in
+     * your own loop.
      * @param {(value: number, index: number, rb: RingBuffer) => void} fn
      */
     forEach(fn) {
