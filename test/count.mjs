@@ -11,13 +11,13 @@
 //
 // A test file added or removed here updates FILES and EXPECTED together.
 // EXPECTED is pinned to the "tests N" line of a plain
-// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js`
-// (60 + 31 + 30 + 9 + 10 = 140), not to this file's tally.
+// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js test/mutant-kills.test.js`
+// (60 + 31 + 30 + 9 + 10 + 8 = 148), not to this file's tally.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js'];
-const EXPECTED = 140;
+const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js', 'test/mutant-kills.test.js'];
+const EXPECTED = 148;
 
 process.exitCode = 1;
 
