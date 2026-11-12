@@ -40,11 +40,11 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 ## Constraints
 
 - ESM only.
-- Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision.
+- Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision. A finite `|x| >= 2^128 - 2^103` (about 3.4e38, just past the float32 max 3.4028234663852886e38) stores as +/-Infinity: `push(1e39)` stores `+Infinity` although `1e39` passes `v === v`, so input NaN / finite checks do not predict the stored value.
 - `push` / `tryPush` coerce like a typed-array store: `null`, `''` and `[]` store 0, `undefined` stores NaN (map missing readings to NaN yourself).
 - NaN and +/-Infinity are stored and read back unchanged. Downstream consumers must filter NaN where it matters (e.g. min/max).
 - After `destroy()` the instance is unusable.
-- Not thread-safe. For cross-Worker streaming, the consumer must implement the head/mask discipline against a `SharedArrayBuffer`.
+- Not thread-safe and not shareable across Workers: `head` and `count` are instance fields, not shared memory, and a consumer that takes samples off would have to write `count` too. Cross-thread streaming needs a different structure, an SPSC ring: two monotonic wrapping indices in a `SharedArrayBuffer` header, each written by one side (`Atomics.store`) and read by the other (`Atomics.load`); occupancy `(w - r) >>> 0`, slot `idx & mask`; the indices on separate cache lines, 128 B apart. This package is not that structure (a separate package if ever wanted).
 
 ## Performance
 

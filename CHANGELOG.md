@@ -41,6 +41,8 @@ Release 1.3.0 is on hold; nothing here is versioned yet. Runtime change to `copy
 - `ceilPow2`: a finite `n` in (-2^31, 0] gives 2^32; at or below -2^31 the uint32 wrap decides (`ceilPow2(-(2 ** 31)) === 2 ** 31`).
 - The alias check is ArrayBuffer identity: two SharedArrayBuffer objects over one memory block are not detected.
 - README Companion paragraph no longer says the read side is not allocation-free.
+- README / llms.txt: a finite value with `|x| >= 2^128 - 2^103` (about 3.4e38) stores as +/-Infinity (`push(1e39)` stores `+Infinity` though it passes `v === v`); the docs said only that values round-trip through float32.
+- README Worker FAQ / llms.txt: the claim that the same head/mask discipline works across Workers over a `SharedArrayBuffer` was false (both threads would write `count`); cross-thread use needs a separate SPSC ring with Atomics-published single-writer indices, which this package is not.
 
 ### Tests
 
