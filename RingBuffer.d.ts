@@ -77,6 +77,50 @@ export class RingBuffer implements Iterable<number> {
     tryPush(value: number, options?: TryPushOptions): boolean;
 
     /**
+     * Push `count` samples from `src[srcOffset ...]`, oldest first. Same state
+     * as `count` calls of {@link push}: the same `data` slots, `head` and
+     * `count`; values round through float32 and read back as the same values
+     * (`Object.is`), NaN payload bits unspecified. When `count` > `capacity`
+     * the last `capacity` samples are kept (still the state of `count` pushes).
+     * `count` 0 is a no-op after validation. `srcOffset` defaults to 0 and
+     * `count` to `src.length - srcOffset`.
+     *
+     * Allocates nothing for a Float32Array / Float64Array `src` while each
+     * family's load / store site has seen at most 4 `src` hidden classes
+     * (Node 26.8.2 arm64). The checks and `this.data` read happen once per call;
+     * the alias cache (`_bufOf`, `_buf`) is shared with {@link copyTo}; a sealed or
+     * non-extensible ring works (the cache is then not stored).
+     *
+     * For a few samples per call a loop of {@link push} is faster: in a strict
+     * interleaved A/B run (STATISTICAL, REPORTED; 2026-11-14, Apple M4 Pro, Node v26.8.2,
+     * QUIET at start, load1 3.17, 63 paired rounds per config) a push loop won at 1 and 8 samples per call and `pushBatch`
+     * won at 32 and 128, for Float32Array and Float64Array `src` alike; the
+     * crossover between 8 and 32 was not measured.
+     *
+     * Every check runs before the first data store; a frozen ring throws from
+     * the `head` store. Only a whole-ring `Object.freeze` is covered:
+     * per-property tampering (a non-writable `count` alone, accessors on
+     * `head` / `count` / `data`) is unsupported and may leave `head` written,
+     * as with `push`. After `destroy()` it returns `count` and stores nothing
+     * (like `push`). A detached or out-of-bounds `src` reads as length 0:
+     * `count` omitted returns 0; an explicit `count` >= 1 throws RangeError.
+     * @returns `count`.
+     * @throws TypeError if `src` is not a TypedArray, or is any TypedArray other
+     *         than Float32Array / Float64Array (BigInt kinds included), even at
+     *         count 0; or, when count > 0, if `this.data` is not a Float32Array
+     *         (intrinsic tag, checked on every call; the `capacity`-slots
+     *         RangeError is checked first); or, when count > 0 and the ring is
+     *         frozen (`Object.freeze`), from the `head` store. Nothing is written.
+     * @throws RangeError if `srcOffset` or `count` is not a non-negative integer
+     *         (no coercion; no user `valueOf` runs), or `srcOffset + count >
+     *         src.length` (checked before the element-type check); or, when
+     *         count > 0, if `this.data` does not hold `capacity` slots
+     *         (replaced, resized or detached), or if `src` shares the ring's
+     *         ArrayBuffer. Nothing is written.
+     */
+    pushBatch(src: Float32Array | Float64Array, srcOffset?: number, count?: number): number;
+
+    /**
      * Sample at offset (0 = newest, count-1 = oldest).
      * @returns the sample, or `undefined` if `offset` is not an in-range integer.
      * The `number | undefined` result boxes a non-integer sample (16 B per
@@ -121,7 +165,7 @@ export class RingBuffer implements Iterable<number> {
      * overrides them cannot change what is written.
      *
      * The ring caches its storage's buffer in two own keys (`_bufOf`, `_buf`): a
-     * replaced `data` stays referenced until the next non-empty copy or `destroy()`.
+     * replaced `data` stays referenced until the next non-empty copy, non-empty `pushBatch` or `destroy()`.
      * On a non-extensible ring the keys are never updated: the array cached before
      * the lock stays referenced until `destroy()`, or for the ring's lifetime when
      * frozen (`destroy()` cannot write a frozen ring).

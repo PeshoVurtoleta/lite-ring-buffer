@@ -52,10 +52,10 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, C15, D7)*
+   C8, C10, C11, C15, D7, B10)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, C1, C2, C3, C6, C8, C10, C11, C15)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
@@ -197,7 +197,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   test), cycles 1, ends in TurboFan, on both sides; f64 SAME, 0 deopts (REPORTED, decides nothing;
   `.handoff/LU2/evidence/qa-deopt-diff.log`). R1's FC build (eab8983a) read 0 deopts on f32; this build is 1.3.0
   (eaa32ee7), so the builds differ -- not a regression claim (no deopt loop). `pushBatch` has no candidate yet: the
-  driver never calls it, so `--fn pushBatch` reads NO-VERDICT until the R2 build extends the driver.
+  driver never calls it, so `--fn pushBatch` reads NO-VERDICT until the before side has pushBatch. The R2 build
+  (ff6ee762) extends the driver with a guarded pushBatch phase (`test/tools/deopt-driver.mjs`); `--fn copyTo,pushBatch` still reads NO-VERDICT for pushBatch while git HEAD (eef921f) lacks it (`.handoff/R2/reported/deopt-diff.log`, exit 2; `--fn copyTo` alone: f32 SAME, f64 SAME, control DIFF, `.handoff/R2/reported/deopt-diff-copyTo.log`); a verdict needs the post-commit run (PLAN-G1 A2 FILLER).
 
 ### A9. allocation-diff REFUSED (unit LU)
 
@@ -280,11 +281,28 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY); `.handoff/PROPOSAL-r2.md` section 4.
 - **Law.** 1, 4, 7 (and zero-box): a doc claim that pushBatch allocates nothing covers the > 4-class and the
   after-a-BigInt-call paths.
-- **Gate.** None yet (research). The R2 build unit adds alloc lanes for both traps, each with a must-allocate
-  MASK-shaped control (PROPOSAL-r2 section 5). Reopen (1) / (4) only with a body that clears those lanes and
+- **Gate.** `test/alloc.mjs` pushBatch lanes (7 plain, BIGINT, MEGA F32 / F64) with must-allocate controls
+  `maskBig` and `maskMega` (F32 / F64), ~2048 B per call; the torture lane `pushBatch 1024 set+slice+F64+over-cap`
+  (major 0 / minor 0); `npm run bench:pushbatch` (STATISTICAL, dev-only, not in verify). Strict run of record
+  `.handoff/R2/ab/strict-1/` (build ff6ee762, `quiet-lock run --strict` exit 0, QUIET at start, load1 3.17 -> 3.57,
+  2026-11-14T21:17:48Z-21:18:41Z, Apple M4 Pro, Node v26.8.2, K 21 x 3 compilations): push loop faster at chunks 1 / 8
+  (all 8 cells SLOWER), pushBatch faster at 32 / 128 (all 12 cells FASTER), every A/A median 0.968-1.024, SLOW/CAND
+  >= 2.44. Provenance caveat: a docs helper's `npm test` may have overlapped part of the 52 s window; the A/A bands held.
+  Per R2-4, no chunk-1 multiplier is quoted (constant-count folding in the harness). Reopen (1) / (4) only with a body that clears those lanes and
   stays under 460 B; (2) only with a strict A/B where Float64 `set` beats the loop; (3) only with a new mechanism
   (FILLER 2 / A7 rule).
 - **RULING.** Q-R2-PARITY = "A Physical parity"; Q-R2-ALIAS = "A RangeError, read every call"; Q-R2-TYPES = "B Float32/Float64 only"; Q-R2-BIGINT = "A TypeError up front"; Q-R2-SMALL = "A Document it"; Q-R2-STRICT = "A Rule now, strict in build". Maintainer, 2026-11-12, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r2.md` section 7).
+- **RULING.** Q-R2-FROZEN = "A TypeError, nothing written"; Q-R2-DATA = "A Float32Array only" + "TypeError";
+  Q-R2-TAMPER = "A Doc-scope only" (the three lines added to PROPOSAL-r2 section 7 during the build). In effect:
+  Q-R2-FROZEN: `head` / `count` are stored before the first data store, so a frozen ring throws TypeError
+  with nothing written (differs from `copyTo`, which copies on a frozen ring); Q-R2-DATA = `pushBatch` checks that
+  `this.data` is a Float32Array by intrinsic tag on every call, before the cache (B10); Q-R2-TAMPER = only a
+  whole-ring `Object.freeze` is covered, per-property tampering is unsupported (as with `push`). Maintainer,
+  2026-11-14, AskUserQuestion, in chat.
+- **RULING (qa).** Q-R2-DESTROY = "A Document as-is" (after `destroy()`, `pushBatch` returns `count`, stores
+  nothing, no throw, like `push`); Q-R2-DETACH = "A Document as-is" (a detached / out-of-bounds `src` reads as
+  length 0: `count` omitted -> 0, explicit `count` >= 1 -> bounds RangeError). Maintainer, 2026-11-14,
+  AskUserQuestion, in chat; pinned by `test/qa-r2.test.js`; no engine change.
 
 ### A14. ic-diff and bytecode-budget PARKED (unit LU2)
 
@@ -300,6 +318,10 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   deopt-diff DIFF that needs IC localisation. Unpark bytecode-budget: the R2 build; the tool's GATE mode `--max
   pushBatch=459,batchCheck=459 --node-version <pinned>` plus a padded-fn must-fail control fits;
   deterministic per V8 build only, so by hand / at release, never in `npm test`.
+- **UNPARKED (bytecode-budget only) by the R2 build, 2026-11-14.** GATE `--max pushBatch=459,batchCheck=459
+  --node-version v26.8.2` exit 0 (pushBatch 322 B, batchCheck 294 B) plus a padded must-fail control (pushBatch
+  736 B, exit 1), run by hand, never in `npm test` (`.handoff/R2/b1fix/gate-3-budget-live.log`,
+  `gate-3-budget-padded.log`). ic-diff stays parked.
 
 ---
 
@@ -493,6 +515,26 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `test/audit-fix.test.js` (storage RangeError, detached `copyToFast`, frozen / sealed ring cases) and
   `test/mutant-kills.test.js` (M7 pin). Re-opens if `data` is allowed to be anything other than a Float32Array of
   exactly `capacity` slots, or if the cache write moves before the checks.
+- **R2 note.** `pushBatch` shares the storage rule (RangeError when `data` is not `capacity` slots) and adds the
+  element-type check (B10). A frozen ring differs from `copyTo`: `pushBatch` is head-first and throws TypeError with
+  nothing written; `copyTo` copies.
+
+### B10. `pushBatch` threw after its head write on a capacity-length non-Float32 `data` (R2 build B1 review)
+
+- **What happened.** In build d4445574 a `data` replaced by `BigInt64Array(capacity)` passed `batchCheck`; `head`
+  went 2 -> 7 and `count` 3 -> 8, then the first store threw: a torn state (set path, `loopF32` and `loopF64` alike).
+  The fix's own review (r1) then found the oracle did not pin the INTRINSIC tag: `instanceof`, prototype-tag and
+  `constructor` mutants of the check all passed; +3 tests.
+- **Root cause.** The storage check verified length only, not element type; the head-first order of Q-R2-FROZEN
+  turned any later store throw into a torn state (law 2). The first oracle did not distinguish the intrinsic tag
+  from spoofable ones (law 1).
+- **Fix.** Q-R2-DATA: an intrinsic `Symbol.toStringTag` check of `data` on every call (count > 0), before the alias
+  cache is read or written (ff6ee762). Residual per Q-R2-TAMPER: per-property tampering (a non-writable `count`
+  alone, accessors on `head` / `count` / `data`) is unsupported and may leave `head` written, as with `push`.
+- **Evidence.** d4445574 (rejected build), ff6ee762 (fixed build); `.handoff/R2/frozen-b1/`, `.handoff/R2/b1fix/`, `.handoff/R2/review-b1fix/`.
+- **Law.** 1, 2.
+- **Gate.** `test/pushbatch.test.js`, describe "replaced storage element type (Q-R2-DATA)" (28 tests). Re-opens if
+  `data` may be anything but a Float32Array of `capacity` slots.
 
 ---
 

@@ -222,6 +222,98 @@ function rotCopy(dst, data, dstOffset, start, cap) {
     }
 }
 
+/**
+ * Cold-path error builders for `pushBatch`. `batchBoundsError` prints a
+ * number argument as its value and anything else as its `typeof` (`null` as
+ * null), so no user `toString` / `valueOf` runs while the message is built.
+ */
+function batchBoundsError(srcOffset, count, slen) {
+    return new RangeError(
+        'LiteRingBuffer: pushBatch needs non-negative integer srcOffset and count with srcOffset + count <= ' +
+        'src.length (got srcOffset ' +
+        (typeof srcOffset === 'number' ? '' + srcOffset : srcOffset === null ? 'null' : typeof srcOffset) +
+        ', count ' + (typeof count === 'number' ? '' + count : count === null ? 'null' : typeof count) +
+        ', src.length ' + slen + '); nothing written'
+    );
+}
+
+function batchTypeError(tag) {
+    return new TypeError(
+        'LiteRingBuffer: pushBatch needs a Float32Array or Float64Array src (got ' + tag + '); nothing written'
+    );
+}
+
+function batchAliasError() {
+    return new RangeError(
+        'LiteRingBuffer: pushBatch src shares the ring\'s buffer (push from a separate array); nothing written'
+    );
+}
+
+function batchDataError(tag) {
+    return new TypeError('LiteRingBuffer: pushBatch storage is a ' + tag + ', not a Float32Array; nothing written');
+}
+
+/**
+ * The prologue of `pushBatch`; every check runs before the first state
+ * write. In order: RangeError (bounds: `srcOffset` / `count` not
+ * non-negative integers, or `srcOffset + count` past `slen`, NaN-safe),
+ * TypeError (`src` is not tagged Float32Array / Float64Array, read through
+ * the intrinsic Symbol.toStringTag getter: BigInt kinds included, even at
+ * count 0), then -- only when count > 0 -- the storage RangeError (`data`'s
+ * intrinsic length is not `capacity`), the data TypeError (`data` is not
+ * tagged Float32Array: replaced storage, checked on every call, before the
+ * cache is read or written) and the alias RangeError (`src`'s buffer is
+ * `data`'s). Returns the tag. `data` is the array the caller
+ * stores into (read once by the caller).
+ *
+ * `data`'s buffer comes from the same identity-keyed cache as `copyCheck`
+ * (`_bufOf` / `_buf`), with the same rules: re-read through the intrinsic
+ * getter whenever `data` is not the cached array, the key stored only
+ * after that read and only on an extensible ring. `src`'s buffer is read
+ * through the intrinsic getter on every call. The alias check is
+ * ArrayBuffer identity, with `copyCheck`'s SharedArrayBuffer limit.
+ */
+function batchCheck(rb, data, src, slen, srcOffset, count) {
+    // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
+    if (!Number.isInteger(srcOffset) || srcOffset < 0 || !Number.isInteger(count) || count < 0 ||
+        !(srcOffset + count <= slen)) {
+        throw batchBoundsError(srcOffset, count, slen);
+    }
+    const tag = TA_TAG.call(src);
+    if (tag !== 'Float32Array' && tag !== 'Float64Array') throw batchTypeError(tag);
+    if (count !== 0) {
+        const len = TA_LENGTH.call(data);
+        if (len !== rb.capacity) throw storageError('pushBatch', len, rb.capacity);
+        const dtag = TA_TAG.call(data);
+        if (dtag !== 'Float32Array') throw batchDataError(dtag);
+        let buf = rb._buf;
+        if (data !== rb._bufOf) {
+            buf = TA_BUFFER.call(data);
+            if (Object.isExtensible(rb)) {
+                rb._buf = buf;
+                rb._bufOf = data;
+            }
+        }
+        // Fail closed: pushing a ring's own storage into it would overwrite
+        // samples before they are read.
+        if (TA_BUFFER.call(src) === buf) throw batchAliasError();
+    }
+    return tag;
+}
+
+/**
+ * The masked store loops of `pushBatch`, one per `src` family, so a Float32
+ * and a Float64 `src` never share a load or store site (each site stays
+ * typed while it has seen at most 4 `src` hidden classes).
+ */
+function loopF32(data, src, h, o, n, mask) {
+    for (let i = 0; i < n; i++) data[(h + i) & mask] = src[o + i];
+}
+
+function loopF64(data, src, h, o, n, mask) {
+    for (let i = 0; i < n; i++) data[(h + i) & mask] = src[o + i];
+}
+
 export class RingBuffer {
     /**
      * @param {number} [requestedCapacity=1024] minimum capacity in [1, 2^31];
@@ -295,6 +387,81 @@ export class RingBuffer {
         if (this.count === this.capacity && options && options.overwrite === false) return false;
         this.push(value);
         return true;
+    }
+
+    /**
+     * Push `count` samples `src[srcOffset] .. src[srcOffset + count - 1]`,
+     * oldest first. The ring ends in exactly the state `count` calls of
+     * `push` would leave: the same `data` slots, `head` and `count` (each
+     * value rounds through float32; NaN round-trips; values are not
+     * validated). A `count` above `capacity` keeps the last `capacity`
+     * samples. `count === 0` is a no-op, after validation.
+     *
+     * `srcOffset` defaults to 0 and `count` to `src.length - srcOffset`
+     * (`src`'s length read through the intrinsic `length` getter; the
+     * default is computed only for an integer `srcOffset`).
+     *
+     * Allocates nothing for a Float32Array / Float64Array `src` while each
+     * family's load / store site has seen at most 4 `src` hidden classes
+     * (each subclass, realm and resizable-buffer variant counts as one),
+     * Node 26.8.2 arm64. A whole Float32Array `src` that fits before the wrap
+     * is one intrinsic `set`; every other call is a masked scalar loop.
+     *
+     * `head` and `count` are stored before the first sample, so a frozen
+     * ring throws a TypeError with `data`, `head` and `count` unchanged
+     * (`push` stores its sample first). A sealed or
+     * `Object.preventExtensions` ring works; its alias-check cache is not
+     * stored (see `copyTo`). The cache (`_bufOf` / `_buf`) is shared with
+     * `copyTo` / `copyToFast`.
+     *
+     * @param {Float32Array|Float64Array} src samples to push -- caller owns it.
+     * @param {number} [srcOffset=0]
+     * @param {number} [count=src.length - srcOffset]
+     * @returns {number} `count` (samples consumed; may exceed `capacity`).
+     * @throws {TypeError} if `src` is not a TypedArray (the intrinsic
+     *         `length` getter throws; a DataView too), or is any TypedArray
+     *         other than Float32Array / Float64Array (a subclass counts as
+     *         its element type; BigInt64Array / BigUint64Array included),
+     *         even when count is 0; or, when count > 0, if `this.data` is
+     *         not a Float32Array (replaced storage, checked on every call);
+     *         or, when the ring is frozen, from the `head` store. Nothing
+     *         is written.
+     * @throws {RangeError} if `srcOffset` or `count` is not a non-negative
+     *         integer (no coercion: a string, BigInt, Symbol, null or object
+     *         is rejected, and no user `valueOf` / `toString` runs), or
+     *         `srcOffset + count > src.length`; checked before the element-type check.
+     *         Then, only when count > 0: if `this.data` does not hold
+     *         `capacity` slots (replaced, resized or detached), or if `src`
+     *         shares the ring's buffer (its ArrayBuffer, read through the
+     *         intrinsic `buffer` getter, is `this.data`'s). Nothing is written.
+     */
+    pushBatch(src, srcOffset, count) {
+        const slen = TA_LENGTH.call(src);
+        if (srcOffset === undefined) srcOffset = 0;
+        if (count === undefined && Number.isInteger(srcOffset)) count = slen - srcOffset;
+        // Read once: batchCheck checks the same array the stores write.
+        const data = this.data;
+        const tag = batchCheck(this, data, src, slen, srcOffset, count);
+        if (count === 0) return 0;
+        const cap = this.capacity;
+        const mask = this.mask;
+        let h = this.head, o = srcOffset, n = count;
+        if (n > cap) {
+            o += n - cap;
+            h = (h + n - cap) & mask;
+            n = cap;
+        }
+        // head / count before the first data store: a frozen ring throws here, nothing written.
+        this.head = (h + n) & mask;
+        const c = this.count + n;
+        this.count = c < cap ? c : cap;
+        if (tag === 'Float32Array') {
+            if (o === 0 && n === slen && h + n <= cap) TA_SET.call(data, src, h);
+            else loopF32(data, src, h, o, n, mask);
+        } else {
+            loopF64(data, src, h, o, n, mask);
+        }
+        return count;
     }
 
     /**

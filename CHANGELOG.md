@@ -10,14 +10,26 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
-Test tooling only; `RingBuffer.js` unchanged.
+New `pushBatch(src, srcOffset, count)` (R2), plus test tooling. Alloc and torture figures below are from the R2 build ff6ee762 run of 2026-11-14 (Node v26.8.2 arm64), PRELIMINARY host (load1 4.03 at the verify start vs baseline 2.21).
+
+### Added
+
+- `pushBatch(src, srcOffset = 0, count = src.length - srcOffset)`: pushes `count` samples from a Float32Array / Float64Array and returns `count`. The state is that of `count` calls of `push` (same `data` slots, `head`, `count`; values round through float32, same values by `Object.is`, NaN payload bits unspecified). `count` > `capacity` keeps the last `capacity` samples; `count` 0 is a no-op after validation.
+- `pushBatch` errors, all before the first data store (nothing written): `TypeError` for a non-TypedArray `src` or any TypedArray other than Float32Array / Float64Array (BigInt kinds, even at count 0), for count > 0 a `this.data` that is not a Float32Array (intrinsic tag, every call; the `capacity`-slots RangeError is checked first), and, for count > 0, a frozen ring (from the `head` store); `RangeError` for `srcOffset` / `count` not non-negative integers (no coercion), `srcOffset + count > src.length` (before the element-type check), and for count > 0 a `data` not holding `capacity` slots or a `src` sharing the ring's ArrayBuffer. Only a whole-ring `Object.freeze` is covered; per-property tampering is unsupported and may leave `head` written, as with `push`. After `destroy()` it returns `count` and stores nothing (like `push`); a detached or out-of-bounds `src` reads as length 0 (`count` omitted -> 0, explicit `count` >= 1 -> `RangeError`). The alias cache (`_bufOf`, `_buf`) is shared with `copyTo`.
+- Allocation: `pushBatch` allocates nothing for a Float32Array / Float64Array `src` while each family's load / store site has seen at most 4 `src` hidden classes (Node 26.8.2 arm64); gated by the `npm run alloc` lanes below.
+- Speed: for a few samples per call a loop of `push` is faster (1 and 8 samples per call); `pushBatch` is faster at 32 and 128 (strict A/B, see `npm run bench:pushbatch` below; the crossover between 8 and 32 was not measured).
+- Bytecode size, REPORTED (`bytecode-budget.sh` GATE `--max pushBatch=459,batchCheck=459 --node-version v26.8.2`, exit 0, Node v26.8.2): `pushBatch` 322 B, `batchCheck` 294 B, under the 460 B inline limit; a padded must-fail control (`pushBatch` 736 B) exits 1. Run by hand, not in `npm test`.
 
 ### Tests
 
 - The inlining tool now reads `inlining-budget-diff.sh` from the new devDependency `@zakkster/lite-utils`, pinned exactly to "1.0.0" (`dependencies` stays empty). The vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b) is deleted. Resolution is fail closed: only `node_modules/@zakkster/lite-utils`, package name + version 1.0.0 + script present, else exit 2 with a named reason; a version row also fails on a dependency bump.
 - `test/InliningTool.test.js` 31 -> 35 tests; the script's `--self-test` is now 92 checks (was 89) and six script mutants are red (the null-control mutant m4 that survived every deterministic row at 465881b is now killed).
 - New dev-only `npm run deopt-diff` (`test/tools/deopt-diff.mjs`, REPORTED, not in `verify`): deopt-diff of `copyTo` (or `--fn LIST`), HEAD vs the working tree, f32 and f64 drivers plus a blind control that must read DIFF; new `test/DeoptTool.test.js` (7 deterministic tests).
-- `npm test` 163 -> 174 tests.
+- `npm test` 163 -> 174 tests (LU2), then 174 -> 222 with new `test/pushbatch.test.js` (48 tests: physical parity with `push`, defaults and return values, bad arguments, storage / alias / sealed / frozen rings, replaced storage element type), then 222 -> 229 with new `test/qa-r2.test.js` (7 qa tests: `src` / `data` read through the intrinsic `length` / `buffer` getters, never a spoofable property; cross-realm Float32Array / Float64Array `src` accepted; the destroyed-ring and detached-`src` behaviours).
+- `npm run alloc` gains 7 `pushBatch` lanes (Float32 / Float64 `src`; whole, sliced, wrapped, over-capacity), a BIGINT lane and 2 MEGA lanes (Float32 / Float64): every one 0.0-0.2 B per call against the < 1 B gate, with must-allocate controls `maskBig` and `maskMega` (F32 / F64) at about 2048 B per call (PRELIMINARY host, load1 4.03, 2026-11-14, `npm run verify` of build ff6ee762).
+- `npm run torture` gains the gated lane `pushBatch 1024 set+slice+F64+over-cap` (125,000 ops): major 0 / minor 0.
+- The deopt-diff driver (`test/tools/deopt-driver.mjs`) gains a guarded `pushBatch` phase.
+- New dev-only `npm run bench:pushbatch` (`test/bench/pushbatch-ab.mjs` + `test/bench/pushbatch-probe.mjs`, committed in eef921f): strict interleaved A/B harness for `pushBatch` vs a caller's `push` loop. STATISTICAL, not in `verify`. Run of record on build ff6ee762 (`quiet-lock run --strict`, exit 0, QUIET at start (a docs run may have overlapped part of the 52 s window; A/A bands held), load1 3.17 -> 3.57, 2026-11-14T21:17Z, Apple M4 Pro, Node v26.8.2, 21 rounds x 3 compilations = 63 paired rounds per config, 20 configs): a `push` loop is faster at 1 and 8 samples per call, `pushBatch` is faster at 32 and 128, in every Float32 / Float64 `src` cell; every A/A median 0.968-1.024.
 
 ## [1.3.0] - 2026-11-12
 

@@ -47,9 +47,30 @@
  * lane appears every later lane is MEGA, and the subclass lane is last, else
  * exit 2.
  *
- * A build without copyToFast: the default target fails closed (exit 2); an
- * explicit build path (revert / must-fail runs on an older build) prints its
- * copyToFast rows as 'n/a' and gates the rest.
+ * pushBatch lanes (R2): 128 samples per call (values x + 0.5), N calls per
+ * window like every lane. Float32Array src: whole + contiguous (the intrinsic
+ * `set` path, capacity 1024), a +3 slice (masked loop), wrapped (capacity 128,
+ * head 64) and count > capacity (capacity 64); Float64Array src: contiguous,
+ * wrapped, count > capacity. All gated at 0. The BIGINT lane runs the Float64
+ * wrapped call after ONE pushBatch(BigInt64Array) that must throw (exit 2 if it
+ * does not): a BigInt src is rejected before any store site, so it cannot
+ * pollute a float loop. Its must-allocate CONTROL is maskBig, a one-loop MASK
+ * shape defined in this file with the same history (warm Float64, one caught
+ * BigInt64Array call): label 'boxes', >= 1024 B/op (nominal 2048 = one 16 B
+ * HeapNumber per sample).
+ * After 'MEGA 32 -> Int16Array' the run loop calls pbPollute(): 400 loop-path
+ * pushBatch calls (srcOffset 3) for each of Float32Array + 3 subclasses and
+ * Float64Array + 3 subclasses (never copyTo), so each family's loop site holds
+ * its 4-class budget and a single shared loop would hold 8 (megamorphic). The
+ * 'MEGA pushBatch' lanes (Float32 and Float64 src, wrapped) must still read 0;
+ * maskMega, fed the same 8 classes, is their 'boxes' CONTROL. Self-check: the
+ * pushBatch MEGA lanes and their controls come after the Int16 lane and
+ * before the subclass lane, and no earlier MEGA lane names them.
+ *
+ * A build without copyToFast or pushBatch: the default target fails closed
+ * (exit 2); an explicit build path (revert / must-fail runs on an older build)
+ * prints its copyToFast / pushBatch rows as 'n/a'. A gated 'n/a' row fails
+ * (a revert run must fail); a reported one does not.
  *
  * Inlining matters: a method that returns a non-integer double boxes its result
  * whenever the call is NOT inlined (V8 returns tagged values). Run with
@@ -68,6 +89,11 @@ const { RingBuffer } = await import(url);
 const HAS_FAST = typeof RingBuffer.prototype.copyToFast === 'function';
 if (!HAS_FAST && !target) {
     process.stderr.write('alloc: RingBuffer.js has no copyToFast (fail closed; pass an explicit build path for a revert run)\n');
+    process.exit(2);
+}
+const HAS_PB = typeof RingBuffer.prototype.pushBatch === 'function';
+if (!HAS_PB && !target) {
+    process.stderr.write('alloc: RingBuffer.js has no pushBatch (fail closed; pass an explicit build path for a revert run)\n');
     process.exit(2);
 }
 
@@ -115,6 +141,35 @@ function filled(cap, n) {
 const vals = new Float64Array(16);
 for (let i = 0; i < 16; i++) vals[i] = i + 0.25;
 
+// pushBatch: samples per call, and a src of class K holding x + 0.5 (not Smi-representable).
+const PB = 128;
+function srcOf(K, len) {
+    const s = new K(len);
+    for (let i = 0; i < len; i++) s[i] = i + 0.5;
+    return s;
+}
+const BIG = new BigInt64Array(PB);
+
+// The MASK shape (one masked loop for every src family), as two separate
+// functions so each control has its own feedback: the must-allocate controls.
+function maskBig(data, src, h, o, n, mask) {
+    for (let i = 0; i < n; i++) data[(h + i) & mask] = src[o + i];
+}
+function maskMega(data, src, h, o, n, mask) {
+    for (let i = 0; i < n; i++) data[(h + i) & mask] = src[o + i];
+}
+
+/** One BigInt64Array call that must throw; exit 2 if it does not (the BigInt lane / control would prove nothing). */
+function bigThrows(name, call) {
+    try {
+        call();
+    } catch (e) {
+        return;
+    }
+    process.stderr.write('alloc: ' + name + ': the BigInt64Array call did not throw\n');
+    process.exit(2);
+}
+
 const lanes = [
     ['baseline (empty loop)', null, () => (n) => { for (let i = 0; i < n; i++) sink[0] += i & 7; }],
     ['push(v)', 0, () => { const rb = filled(8, 13); return (n) => { for (let i = 0; i < n; i++) rb.push(vals[i & 15]); }; }],
@@ -147,6 +202,30 @@ const lanes = [
     ['copyToFast 1024, contiguous', 'report', HAS_FAST ? () => { const rb = filled(1024, 1024); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyToFast(out); }; } : null],
     ['copyToFast 1024, wrapped', 'report', HAS_FAST ? () => { const rb = filled(1024, 1300); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyToFast(out); }; } : null],
     ['getOrDefault(i) no default', 'report', () => { const rb = filled(8, 13); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.getOrDefault(i & 7); }; }],
+    // pushBatch, 128 samples per call. Capacity 1024 from head 0: head stays a multiple of 128 (contiguous);
+    // capacity 128 from head 64: every call wraps; capacity 64: count > capacity.
+    ['pushBatch F32 128 whole, cap 1024 (set)', 0, HAS_PB ? () => { const rb = filled(1024, 1024); const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['pushBatch F32 128 slice +3, cap 1024', 0, HAS_PB ? () => { const rb = filled(1024, 1024); const s = srcOf(Float32Array, PB + 3); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s, 3, PB); }; } : null],
+    ['pushBatch F32 128 wrapped, cap 128 h64', 0, HAS_PB ? () => { const rb = filled(128, 192); const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['pushBatch F32 128 > cap 64', 0, HAS_PB ? () => { const rb = filled(64, 64); const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['pushBatch F64 128, cap 1024 contiguous', 0, HAS_PB ? () => { const rb = filled(1024, 1024); const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['pushBatch F64 128 wrapped, cap 128 h64', 0, HAS_PB ? () => { const rb = filled(128, 192); const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['pushBatch F64 128 > cap 64', 0, HAS_PB ? () => { const rb = filled(64, 64); const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    // BigInt: one throwing call, then the Float64 wrapped lane again (loopF64 already warm from the lane above).
+    ['BIGINT pushBatch F64 128 wrapped', 0, HAS_PB ? () => {
+        const rb = filled(128, 192);
+        const s = srcOf(Float64Array, PB);
+        bigThrows('BIGINT pushBatch', () => rb.pushBatch(BIG, 0, PB));
+        return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); };
+    } : null],
+    ['CONTROL maskBig F64 128 wrapped', 'boxes', () => {
+        const rb = filled(128, 192);
+        const d = rb.data;
+        const s = srcOf(Float64Array, PB);
+        for (let i = 0; i < 400; i++) maskBig(d, s, 64, 0, PB, 127);
+        bigThrows('CONTROL maskBig', () => maskBig(d, BIG, 64, 0, PB, 127));
+        return (n) => { for (let i = 0; i < n; i++) maskBig(d, s, 64, 0, PB, 127); };
+    }],
     // Controls: must allocate, or the counter is blind and the gate has no teeth.
     ['CONTROL subarray per op', 'view', () => { const rb = filled(32, 50); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.data.subarray(0, 4); }; }],
     // MEGA lanes: keep them last (see header). The run loop calls megaPollute() before the first one.
@@ -156,6 +235,11 @@ const lanes = [
     // rotCopy guard: the full-ring rotate never used the shared site (passes on 63eb5bc1 too).
     ['MEGA 1024 F32, full, start 768', 0, () => { const rb = filled(1024, 1792); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
     ['MEGA 32 -> Int16Array, wrapped', 'mega', () => { const rb = filled(32, 50); const out = new Int16Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyTo(out); }; }],
+    // The run loop calls pbPollute() before the first 'MEGA pushBatch' lane (8 src classes, 4 per family).
+    ['MEGA pushBatch F32 128 wrapped', 0, HAS_PB ? () => { const rb = filled(128, 192); const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['MEGA pushBatch F64 128 wrapped', 0, HAS_PB ? () => { const rb = filled(128, 192); const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
+    ['MEGA CONTROL maskMega F32 128 wrapped', 'boxes', () => { const rb = filled(128, 192); const d = rb.data; const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) maskMega(d, s, 64, 0, PB, 127); }; }],
+    ['MEGA CONTROL maskMega F64 128 wrapped', 'boxes', () => { const rb = filled(128, 192); const d = rb.data; const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) maskMega(d, s, 64, 0, PB, 127); }; }],
     // LAST: 4 Float32Array subclasses + the plain class = 5 on the Float32 site (residual F1b).
     ['MEGA 32 F32 after 4 F32 subclasses', 'report', () => {
         const rb = filled(32, 50);
@@ -184,6 +268,24 @@ function megaPollute() {
     }
 }
 
+/**
+ * Before the first 'MEGA pushBatch' lane: 400 loop-path pushBatch calls (srcOffset 3) and 400 maskMega calls
+ * for each of Float32Array + 3 subclasses and Float64Array + 3 subclasses. Never calls copyTo.
+ */
+function pbPollute() {
+    const kinds = [Float32Array, class F32a extends Float32Array {}, class F32b extends Float32Array {},
+        class F32c extends Float32Array {}, Float64Array, class F64a extends Float64Array {},
+        class F64b extends Float64Array {}, class F64c extends Float64Array {}];
+    const rb = filled(128, 192);
+    for (const K of kinds) {
+        const s = srcOf(K, PB + 3);
+        for (let i = 0; i < 400; i++) {
+            if (HAS_PB) rb.pushBatch(s, 3, PB);
+            maskMega(rb.data, s, 64, 3, PB, 127);
+        }
+    }
+}
+
 // The MEGA lanes poison copyTo's feedback for every later lane: they must be the tail, the subclass lane last.
 const megaFirst = lanes.findIndex(([name]) => name.startsWith('MEGA '));
 const megaLast = lanes.length - 1;
@@ -196,9 +298,23 @@ if (megaBad) {
     process.stderr.write('alloc: MEGA lanes must be the last lanes, the subclass lane last of all\n');
     process.exit(2);
 }
+// pbPollute() runs before the first 'MEGA pushBatch' lane: after the Int16 control, and every MEGA lane from there
+// up to the subclass lane is a pushBatch lane or a maskMega control (both kinds present); none before it.
+const isPbMega = (name) => name.startsWith('MEGA pushBatch') || name.startsWith('MEGA CONTROL maskMega');
+const pbFirst = lanes.findIndex(([name]) => name.startsWith('MEGA pushBatch'));
+const int16At = lanes.findIndex(([name]) => name.startsWith('MEGA 32 -> Int16Array'));
+let pbBad = int16At < 0 || !(pbFirst > int16At) ||
+    !lanes.some(([name]) => name.startsWith('MEGA CONTROL maskMega'));
+for (let i = megaFirst; !pbBad && i < megaLast; i++) {
+    if ((i >= pbFirst) !== isPbMega(lanes[i][0])) pbBad = true;
+}
+if (pbBad) {
+    process.stderr.write('alloc: MEGA pushBatch lanes and maskMega controls must follow the Int16 lane, before the subclass lane\n');
+    process.exit(2);
+}
 
 // A mistyped label would turn a gated lane into an ungated one.
-const LABELS = [null, 0, 'box16', 'view', 'report', 'mega'];
+const LABELS = [null, 0, 'box16', 'view', 'report', 'mega', 'boxes'];
 for (const [name, expect] of lanes) {
     if (!LABELS.includes(expect)) {
         process.stderr.write('alloc: lane "' + name + '" has unknown expect label ' + String(expect) + '\n');
@@ -211,6 +327,7 @@ let base = 0;
 for (let li = 0; li < lanes.length; li++) {
     const [name, expect, make] = lanes[li];
     if (li === megaFirst) megaPollute();
+    if (li === pbFirst) pbPollute();
     // null make: the method is missing on an explicit (older) build -> 'n/a'.
     if (make === null) { rows.push({ name, expect, net: NaN, first: NaN }); continue; }
     globalThis.gc();
@@ -235,6 +352,7 @@ for (const r of rows) {
     if (r.expect === 'box16' && !(r.net >= 15 && r.net < 17)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want 16): counter is blind');
     if (r.expect === 'view' && !(r.net >= 100)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want >= 100): counter is blind');
     if (r.expect === 'mega' && !(r.net >= 256)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want >= 256): the pollution did not make the shared site megamorphic');
+    if (r.expect === 'boxes' && !(r.net >= 1024)) fails.push(r.name + ' reads ' + fmt(r.net) + ' B/op (want >= 1024): the MASK control did not box, so its lane proves nothing');
 }
 if (REPORT) process.exit(0);
 if (fails.length) {
