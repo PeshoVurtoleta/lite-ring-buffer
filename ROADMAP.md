@@ -146,7 +146,7 @@ maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C1
 RULED 2026-11-12 (research pass, `.handoff/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
 this sketch where they differ -- count > capacity keeps physical n x push parity (head = (head + count) & mask, not
 head = 0); src is Float32Array / Float64Array only (other TypedArrays, BigInt included, TypeError); `set` only for a
-whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c).
+whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c). Post-release light audit 2026-11-15 (one Opus reviewer, read-only, eef921f / eaa32ee7 vs 3860688 / ff6ee762): FINDINGS, no DEFECT -- 3 DOC fixed in the working tree (README destroy / batch-ingest wording, .d.ts frozen count-0), 2 JSDoc NITs deferred to the next unit touching RingBuffer.js, 1 test gap (no alloc lane for a resizable-buffer / other-realm `src`; resizable-buffer views measured <= 0.25 B/op untimed, REPORTED; other-realm not measured) left as a FILLER. Evidence .handoff/audit-1.4.0/.
 
 Real gap: AudioWorklet blocks (128 frames), WebSocket chunks and physics sub-steps arrive as slices. lite-o1
 `RingLog` has no bulk push either.

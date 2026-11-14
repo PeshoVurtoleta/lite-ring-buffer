@@ -8,6 +8,12 @@ Allocation figures below are bytes per call from `npm run alloc`
 over 5 steady-state windows, empty-loop baseline subtracted), Node 26.8.2
 arm64, 2026-10-14. Not timed, so host load does not affect them.
 
+## [Unreleased]
+
+### Docs
+
+- README / `.d.ts` / `llms.txt`: `pushBatch` doc truth from the 1.4.0 post-release audit. After `destroy()` only valid arguments are a silent no-op (invalid ones still throw); a frozen ring throws from the `head` store only for `count` > 0 (`count` 0 returns 0); the batch-ingest summary no longer says "exactly" (NaN payload bits unspecified: the whole-Float32 `set` path keeps a signalling-NaN payload that `push` quiets (audit probe, Node v26.8.2 arm64)). No code change.
+
 ## [1.4.0] - 2026-11-14
 
 New `pushBatch(src, srcOffset, count)` (R2), plus test tooling. Alloc and torture figures below are from the R2 build ff6ee762 run of 2026-11-14 (Node v26.8.2 arm64), PRELIMINARY host (load1 4.03 at the verify start vs baseline 2.21).

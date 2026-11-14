@@ -97,12 +97,14 @@ export class RingBuffer implements Iterable<number> {
      * won at 32 and 128, for Float32Array and Float64Array `src` alike; the
      * crossover between 8 and 32 was not measured.
      *
-     * Every check runs before the first data store; a frozen ring throws from
-     * the `head` store. Only a whole-ring `Object.freeze` is covered:
-     * per-property tampering (a non-writable `count` alone, accessors on
-     * `head` / `count` / `data`) is unsupported and may leave `head` written,
-     * as with `push`. After `destroy()` it returns `count` and stores nothing
-     * (like `push`). A detached or out-of-bounds `src` reads as length 0:
+     * Every check runs before the first data store; for `count` > 0 a frozen
+     * ring throws from the `head` store (`count` 0 returns 0). Only a
+     * whole-ring `Object.freeze` is covered: per-property tampering (a
+     * non-writable `count` alone, accessors on `head` / `count` / `data`) is
+     * unsupported and may leave `head` written, as with `push`. After
+     * `destroy()`, with valid arguments, it returns `count` and stores nothing
+     * (like `push`); invalid arguments still throw. A detached or
+     * out-of-bounds `src` reads as length 0:
      * `count` omitted returns 0; an explicit `count` >= 1 throws RangeError.
      * @returns `count`.
      * @throws TypeError if `src` is not a TypedArray, or is any TypedArray other
