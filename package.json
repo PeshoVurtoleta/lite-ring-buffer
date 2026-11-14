@@ -30,7 +30,8 @@
     "verify": "npm test && npm run alloc && npm run torture && npm run ascii",
     "inline-diff": "node test/tools/inline-diff.mjs",
     "deopt-diff": "node test/tools/deopt-diff.mjs",
-    "bench:copyto": "node test/bench/copyto-ab.mjs"
+    "bench:copyto": "node test/bench/copyto-ab.mjs",
+    "bench:pushbatch": "node test/bench/pushbatch-ab.mjs"
   },
   "keywords": [
     "ring-buffer",
