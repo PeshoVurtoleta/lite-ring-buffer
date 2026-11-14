@@ -1,10 +1,13 @@
 // InliningTool.test.js -- DETERMINISTIC gates for the repo-only inlining tooling (unit LU):
-//   (A) the vendored test/tools/inlining-budget-diff.sh: sha256 pin + teeth, --self-test, script
-//       mutants (temp copies, one exact edit each), fail-closed refusals, two real-V8 NO-VERDICT rows;
-//   (B) test/tools/inline-diff.mjs: the B1 review MUST-COVER rows 1-13. Rows the real script cannot
-//       produce run a STUB inlining-budget-diff.sh in a mkdtemp copy of the tree (inline-diff.mjs
-//       finds the script, the driver and RingBuffer.js from its own directory, and git from
-//       <tree>; the stub tree reads the real repo through GIT_DIR, read-only);
+//   (A) inlining-budget-diff.sh of the exact-pinned devDependency @zakkster/lite-utils 1.0.0, read at
+//       node_modules/@zakkster/lite-utils/ (unit LU2): the pin (devDependency "1.0.0", installed
+//       name + version, no vendored copy), sha256 pin + teeth, --self-test, script mutants (temp
+//       copies, one exact edit each), fail-closed refusals, two real-V8 NO-VERDICT rows;
+//   (B) test/tools/inline-diff.mjs: the B1 review MUST-COVER rows 1-13 and the LU2 lite-utils
+//       preflight rows. Rows the real script cannot produce run a STUB inlining-budget-diff.sh in a
+//       mkdtemp copy of the tree (inline-diff.mjs finds the driver, test/tools/lite-utils.mjs and
+//       RingBuffer.js from its own directory, the script at <tree>/node_modules/@zakkster/lite-utils/,
+//       and git from <tree>; the stub tree reads the real repo through GIT_DIR, read-only);
 //   (C) the harness fails closed: a spawn that cannot start (status null / ENOENT) is RED, never a skip.
 // No row here runs a real before/after VERDICT: that comparison follows tier-up timing, so it is
 // REPORTED and run by hand (`npm run inline-diff`, ruling OQ-1), never inside npm test / verify.
@@ -21,11 +24,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, delimiter } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TOOLS = join(ROOT, 'test', 'tools');
-const SCRIPT = join(TOOLS, 'inlining-budget-diff.sh');
+const LU_DIR = join(ROOT, 'node_modules', '@zakkster', 'lite-utils');
+const SCRIPT = join(LU_DIR, 'inlining-budget-diff.sh');
+const LITE_UTILS = join(TOOLS, 'lite-utils.mjs');
 const INLINE_DIFF = join(TOOLS, 'inline-diff.mjs');
 const DRIVER = join(TOOLS, 'inl-driver.mjs');
 const LIVE = join(ROOT, 'RingBuffer.js');
@@ -48,7 +53,7 @@ const GIT_DIR = realpathSync(join(ROOT, '.git'));
 // asserts it holds no lrb-inline-diff-* work dir, so another session's run can never read as a leak.
 const TEST_ROOT = mkdtempSync(join(tmpdir(), 'lrb-inltest-'));
 const INL_TMP = mkdtempSync(join(tmpdir(), 'lrb-inltmp-'));
-const SCRIPT_TMP = join(TEST_ROOT, 'tmp');   // TMPDIR for the vendored script's own temp files
+const SCRIPT_TMP = join(TEST_ROOT, 'tmp');   // TMPDIR for inlining-budget-diff.sh's own temp files
 mkdirSync(SCRIPT_TMP);
 const PIDS = [];                                // grandchildren a row spawned (killed in after())
 after(() => {
@@ -114,19 +119,22 @@ function cleanEnv(extra) {
 const SCRIPT_ENV = cleanEnv({ TMPDIR: SCRIPT_TMP });
 
 // =================================================================================================
-// (A) vendored inlining-budget-diff.sh
+// (A) inlining-budget-diff.sh from @zakkster/lite-utils 1.0.0 (node_modules, exact devDependency)
 // =================================================================================================
-// Provenance: LiteUtils commit 465881b, inlining-budget-diff.sh, 1530 lines, vendored byte-identical
-// (unit LU TASK 0). Bump this pin on every re-vendor, never to make a local edit pass.
-const SCRIPT_SHA256 = 'f13f33c2dfa8d5891313125d98d298260c019900989339bd751239c8eb9f19c1';   // prefix f13f33c2
+// Provenance: @zakkster/lite-utils 1.0.0, inlining-budget-diff.sh, 1658 lines, as installed by
+// `npm install --save-dev --save-exact @zakkster/lite-utils@1.0.0` (unit LU2; replaces the copy
+// vendored from LiteUtils 465881b, sha256/8 f13f33c2). Bump this pin together with the exact
+// devDependency, never to make a local edit pass.
+const SCRIPT_SHA256 = '7a5cf99b317495fa32594b5fc598a346fdbdbeac64e31554c20dfc10a89eb4a1';   // prefix 7a5cf99b
 function pinOk(buf) { return sha(buf) === SCRIPT_SHA256; }
 
-// Script mutants (anchors at LiteUtils 465881b). Each must match exactly once in the pinned copy and
-// turn --self-test red with the named FAIL line. Two PLAN mutants SURVIVE --self-test:
-//   `die "driver exited non-zero:` -> `echo "driver exited non-zero:`  is caught by the real-V8
-//     driver-exit row below (it matches die()'s "inlining-budget-diff: " line prefix);
-//   `if [[ -z "$v" ]] && ! cmp -s` -> `if false && ! cmp -s`   (null-control compare) is caught by no
-//     row: recorded as a LiteUtils FILLER in .handoff/LU/evidence/b2-mutants.log, never patched here.
+// Script mutants (anchors at @zakkster/lite-utils 1.0.0). Each must match exactly once in the pinned
+// script and turn --self-test red with the named FAIL line. m4 (null-control compare,
+// `if [[ -z "$v" ]] && ! cmp -s` -> `if false && ! cmp -s`) survived --self-test at 465881b; it is
+// killed since LiteUtils 1.0.0 (b70 NULLCTL self-test rows) and is the 6th row below. One PLAN mutant
+// still SURVIVES --self-test:
+//   m6 `die "driver exited non-zero:` -> `echo "driver exited non-zero:`  is caught by the real-V8
+//     driver-exit row below (it matches die()'s "inlining-budget-diff: " line prefix).
 const MUTANTS = [
     ['multiset-sort-u', 'multiset() { sort | uniq -c; }', 'multiset() { sort -u; }',
         'FAIL multiset keeps call-site multiplicity'],
@@ -138,6 +146,8 @@ const MUTANTS = [
         'FAIL driver mode: a kConcurrent compile line without --concurrent is NO-VERDICT'],
     ['always-same', 'if [[ -z "$shown" ]]; then v=SAME', 'if true; then v=SAME',
         'FAIL driver mode (fake node): a real DIFF exits 1'],
+    ['null-control-off', 'if [[ -z "$v" ]] && ! cmp -s', 'if false && ! cmp -s',
+        'FAIL null control (fake node): maglev, before run 2 inlines h0x2, run 1 h0x1 -> NO-VERDICT naming before'],
 ];
 function variant(dir, name, from, to) {
     const src = readFileSync(SCRIPT, 'utf8');
@@ -161,10 +171,37 @@ const mutantRuns = MUTANTS.map(([name, from, to]) => {
     return run('bash', [p, '--self-test'], { cwd: SELF_DIR, env: SCRIPT_ENV });
 });
 
-test('inlining-budget-diff.sh sha256 pin (LiteUtils 465881b, 1530 lines; bump on every re-vendor)', { timeout: T_FAST }, () => {
+test('inlining-budget-diff.sh sha256 pin (lite-utils 1.0.0, 1658 lines; bump with the exact devDependency)', { timeout: T_FAST }, () => {
     const buf = readFileSync(SCRIPT);
-    assert.ok(pinOk(buf), 'test/tools/inlining-budget-diff.sh differs from the pinned LiteUtils 465881b copy');
-    assert.equal(buf.toString('utf8').split('\n').length - 1, 1530);
+    assert.ok(pinOk(buf), SCRIPT + ' differs from the pinned @zakkster/lite-utils 1.0.0 script');
+    assert.equal(buf.toString('utf8').split('\n').length - 1, 1658);
+});
+
+test('lite-utils is pinned exactly: devDependency "1.0.0", installed name + version, no runtime dep, no vendored copy', { timeout: T_FAST }, async () => {
+    const root = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    assert.equal(root.devDependencies['@zakkster/lite-utils'], '1.0.0', 'devDependency must be the exact string "1.0.0"');
+    assert.ok(root.dependencies === undefined || (typeof root.dependencies === 'object' && root.dependencies !== null &&
+        !Array.isArray(root.dependencies) && Object.keys(root.dependencies).length === 0), 'dependencies must stay empty');
+    const pkg = JSON.parse(readFileSync(join(LU_DIR, 'package.json'), 'utf8'));
+    assert.equal(pkg.name, '@zakkster/lite-utils');
+    assert.equal(pkg.version, '1.0.0');
+    assert.ok(!existsSync(join(TOOLS, 'inlining-budget-diff.sh')), 'the vendored test/tools/inlining-budget-diff.sh is back');
+    const lu = await import(pathToFileURL(LITE_UTILS).href);
+    assert.equal(lu.LITE_UTILS_VERSION, '1.0.0');
+    assert.deepEqual(lu.liteUtilsScript(ROOT, 'inlining-budget-diff.sh'), { ok: true, path: SCRIPT });
+    // the helper fails closed in-process: unreadable / null package.json, inexact version, a dir as the
+    // script, a path out of the package, a walk-up to a parent node_modules, a non-absolute root
+    const mk = (name, pj, script = 'file') => { const r = scratch(name); const d = join(r, 'node_modules', '@zakkster', 'lite-utils'); mkdirSync(d, { recursive: true }); if (pj !== null) writeFileSync(join(d, 'package.json'), pj); if (script === 'file') writeFileSync(join(d, 'x.sh'), ''); else mkdirSync(join(d, 'x.sh')); return r; };
+    const want = (r, f, prefix) => { const v = lu.liteUtilsScript(r, f); assert.ok(v.ok === false && v.why.startsWith(prefix), prefix + ' <- ' + JSON.stringify(v)); };
+    const pj = (v) => JSON.stringify({ name: '@zakkster/lite-utils', version: v });
+    want(mk('h-nopj', null), 'x.sh', 'lite-utils package.json unreadable: ');
+    want(mk('h-null', 'null'), 'x.sh', 'lite-utils package.json unreadable: ');
+    for (const v of ['1.0.0 ', '1.0.0-rc', 'v1.0.0']) want(mk('h-ver', pj(v)), 'x.sh', 'lite-utils version ' + v + ' at ');
+    want(mk('h-dir', pj('1.0.0'), 'dir'), 'x.sh', 'lite-utils script missing: ');
+    want(mk('h-trav', pj('1.0.0')), '../lite-utils/package.json', 'lite-utils script missing: ');
+    const up = mk('h-walk', pj('1.0.0')); const inner = join(up, 'pkg'); mkdirSync(inner); want(inner, 'x.sh', 'lite-utils missing: ');
+    want('', 'x.sh', 'lite-utils missing: '); want(undefined, 'x.sh', 'lite-utils missing: ');
+    assert.equal(lu.liteUtilsScript(mk('h-ok', pj('1.0.0')), 'x.sh').ok, true);   // control: the rows above are not blind
 });
 
 test('sha256 pin has teeth: one flipped byte or an appended newline fails the compare', { timeout: T_FAST }, () => {
@@ -174,19 +211,19 @@ test('sha256 pin has teeth: one flipped byte or an appended newline fails the co
     assert.equal(pinOk(Buffer.concat([readFileSync(SCRIPT), Buffer.from('\n')])), false);
 });
 
-test('--self-test exits 0 with exactly 89 ok checks', { timeout: T_SLOW }, async () => {
+test('--self-test exits 0 with exactly 92 ok checks', { timeout: T_SLOW }, async () => {
     const r = await selfLive;
     expectExit(r, 0, '--self-test');
-    assert.equal(lastLine(r.out), 'self-test: 89 check(s) ok');
-    assert.equal(okCount(r.out), 89);
+    assert.equal(lastLine(r.out), 'self-test: 92 check(s) ok');
+    assert.equal(okCount(r.out), 92);
     assert.equal((r.out.match(/^FAIL/gm) || []).length, 0);
 });
 
 test('an unmodified temp copy passes --self-test (mutant baseline)', { timeout: T_SLOW }, async () => {
     const r = await selfCopy;
     expectExit(r, 0, 'copy --self-test');
-    assert.equal(lastLine(r.out), 'self-test: 89 check(s) ok');
-    assert.equal(okCount(r.out), 89);
+    assert.equal(lastLine(r.out), 'self-test: 92 check(s) ok');
+    assert.equal(okCount(r.out), 92);
 });
 
 MUTANTS.forEach(([name, from, to, failLine], i) => {
@@ -195,8 +232,8 @@ MUTANTS.forEach(([name, from, to, failLine], i) => {
         if (r.anchorError) throw r.anchorError;
         expectExit(r, 1, 'mutant ' + name);
         assert.ok(r.out.split('\n').some((l) => l.startsWith(failLine)), 'mutant ' + name + ': no line starting ' + JSON.stringify(failLine) + '\n' + r.out.slice(-2000));
-        assert.ok(!r.out.includes('self-test: 89 check(s) ok'));
-        assert.ok(okCount(r.out) < 89);
+        assert.ok(!r.out.includes('self-test: 92 check(s) ok'));
+        assert.ok(okCount(r.out) < 92);
     });
 });
 
@@ -243,9 +280,12 @@ test('script real V8: a never-called fn (reset) is NO-VERDICT -- no trace of, ex
 // =================================================================================================
 // (B) inline-diff.mjs
 // =================================================================================================
-// Stub tree: <tree>/RingBuffer.js + <tree>/test/tools/{inline-diff.mjs, inl-driver.mjs} copies and a
-// STUB inlining-budget-diff.sh that execs stub.mjs with the --node it was given. STUB_MODE picks the
-// misbehaviour; the run is named by the after-side dir (after = the A/A run, ctl-<fn> = a control).
+// Stub tree: <tree>/RingBuffer.js + <tree>/test/tools/{inline-diff.mjs, inl-driver.mjs, lite-utils.mjs}
+// copies and, in <tree>/node_modules/@zakkster/lite-utils/, a package.json + a STUB
+// inlining-budget-diff.sh that execs stub.mjs (beside it) with the --node it was given. The tree never
+// reads the real node_modules. STUB_MODE picks the misbehaviour; the run is named by the after-side
+// dir (after = the A/A run, ctl-<fn> = a control). pkg picks the installed package: ok (name
+// @zakkster/lite-utils, version 1.0.0) | none (no package dir) | no-script | 1.0.1 | badname.
 const STUB_SH = '#!/usr/bin/env bash\nn=""; p=""\nfor a in "$@"; do [[ $p == --node ]] && n=$a; p=$a; done\n' +
     'exec "$n" "${0%/*}/stub.mjs" "$@"\n';
 const STUB_MJS = `import fs from 'node:fs';
@@ -288,17 +328,32 @@ if (mode === 'hang' && !fs.existsSync(process.env.STUB_PIDS + '.hung')) {
     process.exit(1);
 }
 `;
-function stubTree(name, { modify = false } = {}) {
+const STUB_PKGS = {
+    ok: { name: '@zakkster/lite-utils', version: '1.0.0' },
+    'no-script': { name: '@zakkster/lite-utils', version: '1.0.0' },
+    '1.0.1': { name: '@zakkster/lite-utils', version: '1.0.1' },
+    badname: { name: '@zakkster/lite-utilz', version: '1.0.0' },
+};
+function stubTree(name, { modify = false, pkg = 'ok' } = {}) {
+    assert.ok(pkg === 'none' || pkg in STUB_PKGS, 'stubTree: unknown pkg ' + pkg);
     const t = scratch(name);
     mkdirSync(join(t, 'test', 'tools'), { recursive: true });
     copyFileSync(INLINE_DIFF, join(t, 'test', 'tools', 'inline-diff.mjs'));
     copyFileSync(DRIVER, join(t, 'test', 'tools', 'inl-driver.mjs'));
-    writeFileSync(join(t, 'test', 'tools', 'inlining-budget-diff.sh'), STUB_SH);
-    chmodSync(join(t, 'test', 'tools', 'inlining-budget-diff.sh'), 0o755);
-    writeFileSync(join(t, 'test', 'tools', 'stub.mjs'), STUB_MJS);
+    copyFileSync(LITE_UTILS, join(t, 'test', 'tools', 'lite-utils.mjs'));
+    const lu = join(t, 'node_modules', '@zakkster', 'lite-utils');
+    if (pkg !== 'none') {
+        mkdirSync(lu, { recursive: true });
+        writeFileSync(join(lu, 'package.json'), JSON.stringify(STUB_PKGS[pkg]) + '\n');
+        writeFileSync(join(lu, 'stub.mjs'), STUB_MJS);
+        if (pkg !== 'no-script') {
+            writeFileSync(join(lu, 'inlining-budget-diff.sh'), STUB_SH);
+            chmodSync(join(lu, 'inlining-budget-diff.sh'), 0o755);
+        }
+    }
     const live = readFileSync(LIVE);
     writeFileSync(join(t, 'RingBuffer.js'), modify ? Buffer.concat([live, Buffer.from('// modified by InliningTool.test.js\n')]) : live);
-    return { tree: t, tool: join(t, 'test', 'tools', 'inline-diff.mjs') };
+    return { tree: t, tool: join(t, 'test', 'tools', 'inline-diff.mjs'), lu };
 }
 function stubRun(s, mode, args = [], extraEnv = {}, git = true) {
     const env = cleanEnv(git ? { GIT_DIR, STUB_MODE: mode, ...extraEnv }
@@ -315,6 +370,30 @@ test('stub control: a well-behaved stub script reads as ok, exit 0 (the stub row
     expectExit(r, 0, 'stub ok');
     assert.match(r.out, /inline-diff: VERDICT ok/);
     assert.equal((r.out.match(/-> ok, diff names/g) || []).length, 3);
+});
+
+// inline-diff.mjs resolves its ROOT from its own (realpath) location: the named dir is the real path.
+function refusedBeforeStaging(r, why, what) {
+    expectExit(r, 2, what);
+    assert.ok(r.out.includes('inline-diff: ' + why + '\ninline-diff: VERDICT NO-VERDICT\n'), what + ': want refusal ' + JSON.stringify(why) + '\n' + r.out);
+    assert.ok(!/^(side|work|run) /m.test(r.out), what + ': staged or ran before the refusal\n' + r.out);
+}
+
+test('lite-utils missing, or without inlining-budget-diff.sh: inline-diff refuses with the named reason, exit 2', { timeout: T_FAST }, async () => {
+    const n = stubTree('lu-none', { pkg: 'none' });
+    const luN = join(realpathSync(n.tree), 'node_modules', '@zakkster', 'lite-utils');
+    refusedBeforeStaging(await stubRun(n, 'ok'), 'lite-utils missing: ' + luN, 'pkg none');
+    const s = stubTree('lu-noscript', { pkg: 'no-script' });
+    const luS = join(realpathSync(s.tree), 'node_modules', '@zakkster', 'lite-utils');
+    refusedBeforeStaging(await stubRun(s, 'ok'), 'lite-utils script missing: ' + join(luS, 'inlining-budget-diff.sh'), 'pkg no-script');
+});
+
+test('lite-utils 1.0.1, or a package.json that names another package: inline-diff refuses with the named reason, exit 2', { timeout: T_FAST }, async () => {
+    const v = stubTree('lu-101', { pkg: '1.0.1' });
+    const luV = join(realpathSync(v.tree), 'node_modules', '@zakkster', 'lite-utils');
+    refusedBeforeStaging(await stubRun(v, 'ok'), 'lite-utils version 1.0.1 at ' + luV + ', want exactly 1.0.0', 'pkg 1.0.1');
+    const b = stubTree('lu-badname', { pkg: 'badname' });
+    refusedBeforeStaging(await stubRun(b, 'ok'), 'lite-utils package.json names @zakkster/lite-utilz, want @zakkster/lite-utils', 'pkg badname');
 });
 
 test('MUST-COVER 1: a VERDICT line that disagrees with the exit status is NO-VERDICT, exit 2', { timeout: T_FAST }, async () => {

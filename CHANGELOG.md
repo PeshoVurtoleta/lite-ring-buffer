@@ -10,6 +10,15 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+Test tooling only; `RingBuffer.js` unchanged.
+
+### Tests
+
+- The inlining tool now reads `inlining-budget-diff.sh` from the new devDependency `@zakkster/lite-utils`, pinned exactly to "1.0.0" (`dependencies` stays empty). The vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b) is deleted. Resolution is fail closed: only `node_modules/@zakkster/lite-utils`, package name + version 1.0.0 + script present, else exit 2 with a named reason; a version row also fails on a dependency bump.
+- `test/InliningTool.test.js` 31 -> 35 tests; the script's `--self-test` is now 92 checks (was 89) and six script mutants are red (the null-control mutant m4 that survived every deterministic row at 465881b is now killed).
+- New dev-only `npm run deopt-diff` (`test/tools/deopt-diff.mjs`, REPORTED, not in `verify`): deopt-diff of `copyTo` (or `--fn LIST`), HEAD vs the working tree, f32 and f64 drivers plus a blind control that must read DIFF; new `test/DeoptTool.test.js` (7 deterministic tests).
+- `npm test` 163 -> 174 tests.
+
 ## [1.3.0] - 2026-11-12
 
 `copyTo` allocates 0 B at every size while each of its store sites has seen at most 4 `dst` hidden classes (R1 + R1b + the 2026-11-12 audit fix); new allocating `copyToFast`; a `dst` that aliases the ring, or a ring whose storage was replaced or detached, now throws `RangeError` and writes nothing. Alloc figures: `npm run alloc` inside `npm run verify`, 2026-11-12, Node v26.8.2 arm64 (DETERMINISTIC, gated). Timing: STATISTICAL, REPORTED only.

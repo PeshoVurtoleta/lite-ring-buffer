@@ -32,8 +32,8 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 - `.handoff/` is gitignored: those paths exist only in the maintainer's main checkout.
 - Tiers: DETERMINISTIC gates run in `npm test` / `npm run verify` every time; STATISTICAL gates run
   once per release on a quiet host; REPORTED numbers gate nothing. This package has no STATISTICAL
-  gate in `npm test` / `verify`: its host is ruled (local QUIET, strict; R1 step 1) and the copyTo A/B is the dev-only `npm run bench:copyto` (5ae2266), run by hand under `quiet-lock run --strict`. `npm run inline-diff` (unit LU, C10) is REPORTED: run by hand under
-  the quiet lock, outside `verify`; only its deterministic tool tests are in `npm test`.
+  gate in `npm test` / `verify`: its host is ruled (local QUIET, strict; R1 step 1) and the copyTo A/B is the dev-only `npm run bench:copyto` (5ae2266), run by hand under `quiet-lock run --strict`. `npm run inline-diff` (unit LU, C10) and `npm run deopt-diff` (LU2, C15, A8) are REPORTED: run by hand under
+  the quiet lock, outside `verify`; only their deterministic tool tests are in `npm test`.
 
 ## How to add an entry
 
@@ -52,10 +52,10 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, D7)*
+   C8, C10, C11, C15, D7)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, C1, C2, C3, C6, C8, C10, C11)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, C1, C2, C3, C6, C8, C10, C11, C15)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
@@ -76,10 +76,10 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 10. **NaN is data here; null is not zero.** `push(NaN)` is stored and read back so a telemetry gap
     reaches lite-stats-math; a bad `dst` throws, a NaN bound never passes. *(A5, B1)*
 11. **A test-count floor is part of `npm test`.** An emptied, skipped, crashed or early-exiting test
-    file must fail the run. *(C5, C6, C10)*
+    file must fail the run. *(C5, C6, C10, C15)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
-    copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11)*
-13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A13)*
+    copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11, C15)*
+13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A14)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
 ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
@@ -177,7 +177,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 13.
 - **Gate.** None.
 
-### A8. deopt-diff PARKED (unit LU)
+### A8. deopt-diff PARKED (unit LU) -> ADOPTED (LU2)
 
 - **What happened.** The LiteUtils tool family offers a deopt-diff (before / after deoptimization
   comparison). Parked in unit LU (2026-11-11).
@@ -189,7 +189,15 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (107 ok) and `--fn copyTo` on Float32 and Float64 dst, 1.2.1 vs the R1 candidate (eab8983a), each DIFF = 1.2.1's one
   Maglev deopt (`Math.min`) gone, R1 0 deopts, blind control DIFF (not blind). The drivers (`.handoff/R1/deopt/`)
   were not reviewed; summary `.handoff/R1/evidence/S/t6-t7-summary.md` (HISTORY, R1 build burst 2). A11 stays closed.
-  Still not in `verify`; `pushBatch` has no candidate yet.
+  ADOPTED in LU2 (C15) as `npm run deopt-diff` (`test/tools/deopt-diff.mjs`, REPORTED, by hand under the quiet lock, not
+  in `verify`); the drivers (`test/tools/deopt-driver.mjs`) were reviewed in LU2; the script's self-test is 107 ok on
+  lite-utils 1.0.0 (`.handoff/LU2/evidence/deopt-selftest-1.0.0.log`). qa, 1 run (deopt-diff.sh --runs 3 per side; tier lines from run 1 of each side), 2026-11-14T16:50:17Z, Node v26.8.2, HEAD
+  2f212c8, host PRELIMINARY (load1 4.55 vs baseline 2.21): exit 0, control DIFF; f32 SAME with 1 Maglev deopt-eager
+  ("Insufficient type feedback for generic named access", RingBuffer.js:436:17, bytecode offset 91, the `tag === 'Float32Array'`
+  test), cycles 1, ends in TurboFan, on both sides; f64 SAME, 0 deopts (REPORTED, decides nothing;
+  `.handoff/LU2/evidence/qa-deopt-diff.log`). R1's FC build (eab8983a) read 0 deopts on f32; this build is 1.3.0
+  (eaa32ee7), so the builds differ -- not a regression claim (no deopt loop). `pushBatch` has no candidate yet: the
+  driver never calls it, so `--fn pushBatch` reads NO-VERDICT until the R2 build extends the driver.
 
 ### A9. allocation-diff REFUSED (unit LU)
 
@@ -277,6 +285,21 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   stays under 460 B; (2) only with a strict A/B where Float64 `set` beats the loop; (3) only with a new mechanism
   (FILLER 2 / A7 rule).
 - **RULING.** Q-R2-PARITY = "A Physical parity"; Q-R2-ALIAS = "A RangeError, read every call"; Q-R2-TYPES = "B Float32/Float64 only"; Q-R2-BIGINT = "A TypeError up front"; Q-R2-SMALL = "A Document it"; Q-R2-STRICT = "A Rule now, strict in build". Maintainer, 2026-11-12, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r2.md` section 7).
+
+### A14. ic-diff and bytecode-budget PARKED (unit LU2)
+
+- **What happened.** The lite-utils 1.0.0 tool family also offers ic-diff and bytecode-budget; both parked in LU2
+  (2026-11-14). allocation-diff and alloc-per-op stay REFUSED (A9, A10; unchanged).
+- **Root cause.** ic-diff: no ruled claim is about IC state (bytes are gated by `alloc.mjs`, deopts are reported by
+  deopt-diff), and ic-diff has driver mode only, so a wrapper would gate nothing. bytecode-budget: "pushBatch and
+  batchCheck each < 460 B" is a threshold; `inline-diff.mjs` has no `--fn`, and inlining-budget-diff gives a delta
+  (D9), not a threshold verdict.
+- **Evidence.** `.handoff/LU2/PLAN.md`; `.handoff/LU2/FACTS.md`.
+- **Law.** 13.
+- **Gate.** None (absence). Unpark ic-diff: a ruled IC claim (e.g. R2's MEGA "polymorphic, not megamorphic") or a
+  deopt-diff DIFF that needs IC localisation. Unpark bytecode-budget: the R2 build; the tool's GATE mode `--max
+  pushBatch=459,batchCheck=459 --node-version <pinned>` plus a padded-fn must-fail control fits;
+  deterministic per V8 build only, so by hand / at release, never in `npm test`.
 
 ---
 
@@ -620,6 +643,9 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   guard off, kConcurrent c=0, always SAME), and 14 MUST-COVER `inline-diff.mjs` rows (1-13 plus 8b; the run rows against a stub script, 6 and 12 by `--stage-only` on the real tree);
   a missing bash / git / node fails red (OQ-4), no skip, no real A/A verdict there (OQ-1). Open FILLER
   (LiteUtils): script mutant m4 (null-control cmp off) survives every deterministic row.
+  Since LU2 (C15): the script comes from the pinned devDependency `@zakkster/lite-utils` 1.0.0 (the vendored copy is
+  deleted), `--self-test` is 92 checks, six script mutants are red (m4 `if false && ! cmp -s` added), and the m4
+  FILLER is CLOSED (lite-utils 1.0.0 null-control rows kill it).
 
 ### C11. Review-caught teeth defects in the inlining gate (unit LU)
 
@@ -688,6 +714,38 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1.
 - **Gate.** `test/mutant-kills.test.js` (13 mutants, 8 tests; counted by `test/count.mjs`). Re-opens if any
   engine method gains a branch with no test that fails when that branch is mutated.
+
+### C15. Unit LU2: the inlining / deopt tooling moves to the pinned @zakkster/lite-utils 1.0.0
+
+- **What happened.** `@zakkster/lite-utils` is now a devDependency pinned EXACTLY "1.0.0" (`dependencies` stays
+  empty) and the vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b, 1530 lines, sha256 f13f33c2) is
+  deleted. `test/tools/lite-utils.mjs` resolves scripts only from `<root>/node_modules/@zakkster/lite-utils` (no
+  module resolution, no walk-up) and checks package name, version === 1.0.0 and script presence; else the tools
+  exit 2 with a named reason. `test/InliningTool.test.js` pins inlining-budget-diff.sh (7a5cf99b...,
+  1658 lines) and `test/DeoptTool.test.js` T1 pins deopt-diff.sh (95e12a28..., 1857 lines); InliningTool also has a version row (installed 1.0.0, root devDependency
+  exactly "1.0.0", empty dependencies, vendored path absent), so a dependency bump goes red. InliningTool 31 -> 35
+  tests; the script's `--self-test` 89 -> 92 checks; SIX script mutants are red (sort -u, elif false, guard off,
+  kConcurrent c=0, always SAME, and m4 `if false && ! cmp -s`). m4, the open FILLER of C10, is CLOSED: lite-utils
+  1.0.0's null-control self-test rows kill it. m6 (die -> echo) still survives `--self-test` and is still caught
+  by the real-V8 driver-exit row. New `npm run deopt-diff` (A8) and `test/DeoptTool.test.js` (7 rows: sha pin +
+  teeth, `--stage-only` layout on the real tree, missing / wrong-version package -> 2, bad args, exit contract on
+  a stub script incl. precedence 2 > 1, group kill on hang, SIGTERM, temp cleanup). `npm test` 163 -> 174
+  (60 + 35 + 30 + 9 + 10 + 8 + 15 + 7). RingBuffer.js unchanged.
+- **Root cause.** A vendored copy of an unpublished script drifts and cannot be bumped; the exact pin plus a sha
+  pin makes the tool bytes a reviewed, versioned input. Review caught gate-teeth defects in both batches. B1
+  (REJECTED round 1): helper fail-open mutants survived, and the root was coerced / could throw instead of failing
+  closed. B2 (REJECTED round 1): exit precedence 2 > 1 was untested; the hang row could not tell a process-group
+  kill from a pid kill; an uncaught throw exited 1, which reads as "blind" instead of NO-VERDICT; a signal orphaned
+  the detached group and the temp dir. All fixed, then APPROVED.
+- **Evidence.** `.handoff/LU2/PLAN.md`, `.handoff/LU2/evidence/` (`mutants-1.0.0.log`, `deopt-selftest-1.0.0.log`
+  107 ok, `revert-b1.log`, `revert-b2.log`, `npmtest-b2-fr1.log` count 174/174, `qa-inline-diff.log`,
+  `qa-deopt-diff.log`). qa 2026-11-14T16:50:09Z, Node v26.8.2, HEAD 2f212c8, RingBuffer.js eaa32ee7, host
+  PRELIMINARY (load1 4.74 vs baseline 2.21), quiet-lock run non-strict, 1 run: `npm run inline-diff` exit 0, A/A SAME, 3/3
+  controls DIFF on their own fn in turbo + maglev (REPORTED). Working tree, not yet committed.
+- **Law.** 1, 2, 11, 12.
+- **Gate.** `test/InliningTool.test.js` (version / pinned-exactly row, sha pin, `--self-test` 92 checks, six
+  script mutants, MUST-COVER rows) and `test/DeoptTool.test.js`; both in `npm test` (count.mjs `EXPECTED` 174).
+  The real-V8 verdicts stay REPORTED, by hand under the quiet lock.
 
 ---
 
@@ -816,7 +874,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Evidence.** 99e8749 (FC eab8983a), R1b 63eb5bc1 (working tree); `.handoff/HISTORY.md` R1 build burst 2 (T6; `inline-diff-copyto.log`); `.handoff/r1b-fix/evidence/
   inl-FC-vs-new.log` (Node v26.8.2).
 - **Law.** 1, 5.
-- **Gate.** REPORTED, by hand under the quiet lock: `bash test/tools/inlining-budget-diff.sh --fn copyTo ...`.
+- **Gate.** REPORTED, by hand under the quiet lock: `bash node_modules/@zakkster/lite-utils/inlining-budget-diff.sh --fn copyTo ...`.
   `inline-diff.mjs` is not changed (its function list is a FILLER candidate).
 
 ### D10. The intrinsic `buffer` getter and the 460 B inline limit cost R1 copyTo ~21 ns at 32 samples (R1b)

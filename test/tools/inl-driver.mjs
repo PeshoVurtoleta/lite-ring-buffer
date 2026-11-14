@@ -1,4 +1,4 @@
-// inl-driver.mjs -- driver for test/tools/inlining-budget-diff.sh (driver mode).
+// inl-driver.mjs -- driver for inlining-budget-diff.sh (@zakkster/lite-utils 1.0.0, driver mode).
 //
 //   node test/tools/inl-driver.mjs [path/to/RingBuffer.js]
 //

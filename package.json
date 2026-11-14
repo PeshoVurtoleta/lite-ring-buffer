@@ -29,6 +29,7 @@
     "ascii": "node test/ascii.mjs",
     "verify": "npm test && npm run alloc && npm run torture && npm run ascii",
     "inline-diff": "node test/tools/inline-diff.mjs",
+    "deopt-diff": "node test/tools/deopt-diff.mjs",
     "bench:copyto": "node test/bench/copyto-ab.mjs"
   },
   "keywords": [
@@ -64,6 +65,7 @@
   "devDependencies": {
     "@zakkster/lite-gc-profiler": "^1.16.0",
     "@zakkster/lite-leak": "^1.10.0",
-    "@zakkster/lite-signal": "^1.5.2"
+    "@zakkster/lite-signal": "^1.5.2",
+    "@zakkster/lite-utils": "1.0.0"
   }
 }

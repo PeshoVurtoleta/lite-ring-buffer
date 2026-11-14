@@ -18,12 +18,16 @@
 //   after    a copy of the live RingBuffer.js, or --after FILE
 //   ctl-<fn> a copy of after with ONE exact edit: a never-taken branch that pads <fn> past
 //            V8's max-inlined-bytecode-size (460), so <fn> can no longer be inlined.
-// Runs the vendored test/tools/inlining-budget-diff.sh (driver mode, test/tools/inl-driver.mjs)
-// --fn getOrDefault,peekNewest,peekOldest on (before, after) and on each (after, ctl-<fn>).
+// Runs inlining-budget-diff.sh of the exact-pinned devDependency @zakkster/lite-utils 1.0.0, read at
+// node_modules/@zakkster/lite-utils/ only (test/tools/lite-utils.mjs: no resolution, no walk-up), in
+// driver mode (test/tools/inl-driver.mjs) --fn getOrDefault,peekNewest,peekOldest on (before, after)
+// and on each (after, ctl-<fn>). The script's bytes are pinned by test/InliningTool.test.js; this
+// tool prints them as provenance (lite-utils <version> inlining-budget-diff.sh sha256/8 X).
 //
 // Exit 0: before vs after SAME and every control DIFF naming its own fn (and no other).
 // Exit 1: before vs after DIFF, or a control that is not such a DIFF in EVERY tier ("gate blind").
-// Exit 2: fail closed -- a bad option, a missing bash / script / driver / git ref / file, an
+// Exit 2: fail closed -- a bad option, a missing bash / driver / git ref / file, a lite-utils that is
+//   missing, unreadable, misnamed, not exactly 1.0.0 or lacks the script, an
 //   anchor that does not match exactly once, a run that exits 2 / is killed / exits with no
 //   matching VERDICT line, a missing diff file or report.txt. --stage-only DIR stages the five sides into a
 //   new or empty DIR, prints them and exits 0 without running anything.
@@ -36,10 +40,10 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LITE_UTILS_VERSION, liteUtilsScript } from './lite-utils.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
-const SCRIPT = join(HERE, 'inlining-budget-diff.sh');
 const DRIVER = join(HERE, 'inl-driver.mjs');
 const LIVE = join(ROOT, 'RingBuffer.js');
 const FNS = ['getOrDefault', 'peekNewest', 'peekOldest'];
@@ -106,7 +110,9 @@ if ('--cap-ms' in opt) {
 const KEEP = opt['--keep'] === true;
 
 // ---- preflight ----------------------------------------------------------------------------
-if (!isFile(SCRIPT)) die('vendored script missing: ' + SCRIPT);
+const LU = liteUtilsScript(ROOT, 'inlining-budget-diff.sh');
+if (!LU.ok) die(LU.why);
+const SCRIPT = LU.path;
 if (!isFile(DRIVER)) die('driver missing: ' + DRIVER);
 
 function git(args) {
@@ -192,8 +198,9 @@ for (const s of sides) {
     if (sha(readFileSync(join(d, 'RingBuffer.js'))) !== sha(s.src)) die('staging ' + s.key + ' did not round-trip');
     process.stdout.write('side ' + s.key.padEnd(17) + ' sha256/8 ' + sha(s.src).slice(0, 8) + '  ' + s.name + '\n');
 }
-process.stdout.write('driver test/tools/inl-driver.mjs sha256/8 ' + drvSha + ' | script sha256/8 ' +
-    sha(readFileSync(SCRIPT)).slice(0, 8) + ' | node ' + process.version + ' | tiers ' + TIERS + '\n');
+process.stdout.write('driver test/tools/inl-driver.mjs sha256/8 ' + drvSha + ' | lite-utils ' + LITE_UTILS_VERSION +
+    ' inlining-budget-diff.sh sha256/8 ' + sha(readFileSync(SCRIPT)).slice(0, 8) + ' | node ' + process.version +
+    ' | tiers ' + TIERS + '\n');
 process.stdout.write('work ' + work + ('--stage-only' in opt || KEEP ? '' : ' (removed on exit; --keep keeps it)') + '\n');
 if ('--stage-only' in opt) process.exit(0);
 const WHERE = KEEP ? 'artifacts kept in ' + work : 'work dir removed (--keep keeps it)';

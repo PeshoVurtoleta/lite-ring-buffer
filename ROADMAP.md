@@ -82,6 +82,9 @@ STATUS 2026-11-11: done in the working tree (reviewer APPROVED B1 + B2; B3 docs;
 maintainer's commit. Spec and evidence: `.handoff/LU/` (gitignored). Adds `npm run inline-diff`
 (`test/tools/inline-diff.mjs`) over the vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b, pinned
 by sha256) and `test/InliningTool.test.js` (31 tests; `npm test` = 59 + 31 = 90). Details: LEDGER C10 / C11.
+LU2 STATUS 2026-11-14: done in the working tree (reviewer APPROVED B1 + B2), awaiting the maintainer's commit.
+`@zakkster/lite-utils` 1.0.0 is an exact devDependency (the vendored script is deleted); InliningTool 35 tests;
+`npm test` = 174; new `npm run deopt-diff` (REPORTED). Details: LEDGER C15 / A14.
 Maintainer rulings (AskUserQuestion, 2026-11-11):
 - OQ-1 = (a) "REPORTED, by hand": `npm run inline-diff` outside verify; run under the quiet lock before each
   /release and in every unit touching `RingBuffer.js` (R1 / R2 / R3); exit logged in that unit's evidence.
@@ -89,8 +92,9 @@ Maintainer rulings (AskUserQuestion, 2026-11-11):
 - OQ-3 = (a) "git show HEAD": default before = `git show HEAD:RingBuffer.js` staged to temp, named by commit + sha.
 - OQ-4 = (a) "Go red, fail closed": no bash -> `npm test` red.
 Follow-ups: the R1 / R2 / R3 coder batches run `npm run inline-diff` (exit in the unit's evidence). Deopt-diff (LEDGER A8) was unparked in the R1 build burst (T7, REPORTED). `inline-diff`'s anchors do not
-cover `copyTo`: use `inlining-budget-diff.sh --fn copyTo` for it (LEDGER D9).
+cover `copyTo`: use `node_modules/@zakkster/lite-utils/inlining-budget-diff.sh --fn copyTo` for it (LEDGER D9).
 Parked / refused in unit LU: deopt-diff (A8, since unparked), allocation-diff (A9), alloc-per-op (A10).
+Since LU2: ic-diff and bytecode-budget PARKED (A14, LU2); deopt-diff ADOPTED (A8, LU2).
 
 ### R1 -- copyTo allocates at the sizes the ecosystem actually uses (bug-grade)
 
