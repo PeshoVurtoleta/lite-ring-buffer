@@ -196,9 +196,9 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   ("Insufficient type feedback for generic named access", RingBuffer.js:436:17, bytecode offset 91, the `tag === 'Float32Array'`
   test), cycles 1, ends in TurboFan, on both sides; f64 SAME, 0 deopts (REPORTED, decides nothing;
   `.handoff/LU2/evidence/qa-deopt-diff.log`). R1's FC build (eab8983a) read 0 deopts on f32; this build is 1.3.0
-  (eaa32ee7), so the builds differ -- not a regression claim (no deopt loop). `pushBatch` has no candidate yet: the
-  driver never calls it, so `--fn pushBatch` reads NO-VERDICT until the before side has pushBatch. The R2 build
-  (ff6ee762) extends the driver with a guarded pushBatch phase (`test/tools/deopt-driver.mjs`); `--fn copyTo,pushBatch` still reads NO-VERDICT for pushBatch while git HEAD (eef921f) lacks it (`.handoff/R2/reported/deopt-diff.log`, exit 2; `--fn copyTo` alone: f32 SAME, f64 SAME, control DIFF, `.handoff/R2/reported/deopt-diff-copyTo.log`); a verdict needs the post-commit run (PLAN-G1 A2 FILLER).
+  (eaa32ee7), so the builds differ -- not a regression claim (no deopt loop). `pushBatch` had no candidate yet: the
+  LU2 driver did not call it, so `--fn pushBatch` reads NO-VERDICT until the before side has pushBatch. The R2 build
+  (ff6ee762) extends the driver with a guarded pushBatch phase (`test/tools/deopt-driver.mjs`); `--fn copyTo,pushBatch` still reads NO-VERDICT for pushBatch while git HEAD (eef921f) lacks it (`.handoff/R2/reported/deopt-diff.log`, exit 2; `--fn copyTo` alone: f32 SAME, f64 SAME, control DIFF, `.handoff/R2/reported/deopt-diff-copyTo.log`); a verdict needs the post-commit run (PLAN-G1 A2 FILLER). Post-commit run (FILLER R2-5, release 1.4.0 burst), 1 run (deopt-diff.sh --runs 3 per side), 2026-11-14T21:50:17Z, Node v26.8.2, HEAD f03561c vs the working tree, both RingBuffer.js ff6ee762 (byte-identical, so an A/A null control, not a before / after), host QUIET (load1 2.59 vs baseline 2.21): exit 0, control DIFF; `pushBatch` f32 SAME and f64 SAME, 0 deopts on both sides, MAGLEV -> TURBOFAN_JS, 0 cycles; `copyTo` f32 SAME (1 deopt each side, as in LU2), f64 SAME (0 deopts) (REPORTED, decides nothing; `.handoff/release-1.4.0/deopt-diff-copyTo-pushBatch.log`). It shows only that the driver drives `pushBatch` to TurboFan without a deopt; the next `RingBuffer.js` change gets the first real before / after read.
 
 ### A9. allocation-diff REFUSED (unit LU)
 

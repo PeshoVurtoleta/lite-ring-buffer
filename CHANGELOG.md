@@ -8,7 +8,7 @@ Allocation figures below are bytes per call from `npm run alloc`
 over 5 steady-state windows, empty-loop baseline subtracted), Node 26.8.2
 arm64, 2026-10-14. Not timed, so host load does not affect them.
 
-## [Unreleased]
+## [1.4.0] - 2026-11-14
 
 New `pushBatch(src, srcOffset, count)` (R2), plus test tooling. Alloc and torture figures below are from the R2 build ff6ee762 run of 2026-11-14 (Node v26.8.2 arm64), PRELIMINARY host (load1 4.03 at the verify start vs baseline 2.21).
 

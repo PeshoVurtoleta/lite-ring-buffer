@@ -4,10 +4,11 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
-Baseline: 1.3.0 (prepared 2026-11-12: R1 over 1.2.1). 1.2.1 (`27a8326`) was tooling + docs only (units D / D2,
+Baseline: 1.4.0 (prepared 2026-11-14: R2 `pushBatch` + LU2 over 1.3.0; LU2 d68b2fd, bench eef921f, R2 f03561c). 1.3.0 was
+prepared 2026-11-12 (R1 over 1.2.1). 1.2.1 (`27a8326`) was tooling + docs only (units D / D2,
 LEDGER.md); 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 shipped in 1.3.0 (99e8749, bench 5ae2266, R1b fix 7b0f74b, audit fix f66972c / 114af66, qa abc31af): `copyTo`
 allocates 0 B at every size while each of its three store sites has seen at most 4 `dst` hidden classes (LEDGER B8) and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
-after Q-R1B-ROUTER). R2 `pushBatch` is built on the working tree (review-APPROVED build ff6ee762, 2026-11-14), not yet released; strict bench run of record exit 0 (push loop faster at 1 / 8 samples per call, pushBatch at 32 / 128; .handoff/R2/ab/strict-1/).
+after Q-R1B-ROUTER). R2 `pushBatch` shipped in 1.4.0 (f03561c, review-APPROVED build ff6ee762); strict bench run of record exit 0 (push loop faster at 1 / 8 samples per call, pushBatch at 32 / 128; .handoff/R2/ab/strict-1/).
 
 Scope trimmed 2026-11-10 (maintainer). lite-o1 `RingLog` / `RingDeque` do NOT supersede this package (see
 Positioning). The work left is small: pay the suite-law debt, fix R1 (bug-grade), then add R2 / R3. R4 and
@@ -145,7 +146,7 @@ maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C1
 RULED 2026-11-12 (research pass, `.handoff/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
 this sketch where they differ -- count > capacity keeps physical n x push parity (head = (head + count) & mask, not
 head = 0); src is Float32Array / Float64Array only (other TypedArrays, BigInt included, TypeError); `set` only for a
-whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); not yet released.
+whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c).
 
 Real gap: AudioWorklet blocks (128 frames), WebSocket chunks and physics sub-steps arrive as slices. lite-o1
 `RingLog` has no bulk push either.
