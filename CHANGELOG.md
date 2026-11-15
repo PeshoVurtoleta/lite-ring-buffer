@@ -10,6 +10,8 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-11-15
+
 ### Docs
 
 - README "Why" item 2 now says it describes the naive `push` / `shift` array, not a preallocated Array ring, points to the Comparison section, and no longer says every entry is a boxed double (boxing only when values leave the packed-double path); the "Naive Array" diagram's push node matches.

@@ -4,7 +4,8 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
-Baseline: 1.5.3 (prepared 2026-11-15: docs + dev bench patch, B1 acce045 and the M1 drop 6431ec9, over 1.5.2). 1.5.2 was prepared 2026-11-15
+Baseline: 1.5.4 (prepared 2026-11-15: docs patch, the post-1.5.3 fillers 0d6ef59, over 1.5.3). 1.5.3 was prepared 2026-11-15
+(docs + dev bench patch, B1 acce045 and the M1 drop 6431ec9, over 1.5.2). 1.5.2 was prepared 2026-11-15
 (docs patch, the post-1.5.1 housekeeping cb36977, over 1.5.1). 1.5.1 was prepared 2026-11-15
 (M1, the copyLast chain trim fd7af97, over 1.5.0; R3 below). 1.5.0 was prepared 2026-11-15
 (R3 `copyLast` / `copyLastFast` + the e3c1d42 `pushBatch` doc fixes over 1.4.0; R3 bb0459b, qa 2026-11-15). 1.4.0 was prepared 2026-11-14 (R2 `pushBatch` + LU2 over 1.3.0; LU2 d68b2fd, bench eef921f, R2 f03561c). 1.3.0 was
