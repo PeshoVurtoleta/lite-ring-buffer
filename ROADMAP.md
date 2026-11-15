@@ -11,7 +11,7 @@ Baseline: 1.5.3 (prepared 2026-11-15: docs + dev bench patch, B1 acce045 and the
 prepared 2026-11-12 (R1 over 1.2.1). 1.2.1 (`27a8326`) was tooling + docs only (units D / D2,
 LEDGER.md); 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 shipped in 1.3.0 (99e8749, bench 5ae2266, R1b fix 7b0f74b, audit fix f66972c / 114af66, qa abc31af): `copyTo`
 allocates 0 B at every size while each of its three store sites has seen at most 4 `dst` hidden classes (LEDGER B8) and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
-after Q-R1B-ROUTER). R2 `pushBatch` shipped in 1.4.0 (f03561c, review-APPROVED build ff6ee762); strict bench run of record exit 0 (push loop faster at 1 / 8 samples per call, pushBatch at 32 / 128; .handoff/R2/ab/strict-1/).
+after Q-R1B-ROUTER). R2 `pushBatch` shipped in 1.4.0 (f03561c, review-APPROVED build ff6ee762); strict bench run of record exit 0 (push loop faster at 1 / 8 samples per call, pushBatch at 32 / 128; .handoff/archive/1.4.0/R2/ab/strict-1/).
 
 Scope trimmed 2026-11-10 (maintainer). lite-o1 `RingLog` / `RingDeque` do NOT supersede this package (see
 Positioning). The work left is small: pay the suite-law debt, fix R1 (bug-grade), then add R2 / R3. R4 and
@@ -127,10 +127,10 @@ a JS loop. Plan:
 3. DONE in 1.2.0 (0412025): the README Ecosystem line now states the 104 / 208 B per frame; R1 (99e8749) made that line state 0 B (docs batch B4). (Was: until
    then, fix the line; docs-only.)
 
-Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, 0 under the ruled (c) ROT + loop (`.handoff/PROPOSAL-r1.md` section 6: also a full-ring head n/2 lane and a non-full lane); DONE, `test/alloc.mjs` copyTo lanes (LEDGER B4).
+Gate: alloc lanes for `copyTo` at 1024 contiguous and wrapped, 0 under the ruled (c) ROT + loop (`.handoff/archive/1.5.3/PROPOSAL-r1.md` section 6: also a full-ring head n/2 lane and a non-full lane); DONE, `test/alloc.mjs` copyTo lanes (LEDGER B4).
 
-STATUS 2026-11-11: step 1 DONE as a research pass (`.handoff/research/r1/`, PRELIMINARY; its strict hold of
-the deciding rungs is PENDING). Ruled (`.handoff/PROPOSAL-r1.md`): Q-R1 = (c) zero allocation at every size
+STATUS 2026-11-11: step 1 DONE as a research pass (`.handoff/archive/1.5.3/research/r1/`, PRELIMINARY; its strict hold of
+the deciding rungs is PENDING). Ruled (`.handoff/archive/1.5.3/PROPOSAL-r1.md`): Q-R1 = (c) zero allocation at every size
 (full ring + Float32Array dst: `dst.set(data, off)` + `copyWithin` + a loop over the smaller half; else the
 masked loop; routing as built: a full Float32 ring above 32 samples -> ROT, everything else -> the masked loop); Q-R1-SURFACE = a separate allocating `copyToFast(dst, dstOffset)`; Q-R1-ALIAS = fail closed on a
 `dst` sharing `data`'s buffer (intrinsic `buffer` getter, RangeError); Q-STATHOST = local QUIET, strict.
@@ -146,7 +146,7 @@ maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C1
 
 ### R2 -- `pushBatch(src, srcOffset = 0, count = src.length - srcOffset)`
 
-RULED 2026-11-12 (research pass, `.handoff/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
+RULED 2026-11-12 (research pass, `.handoff/archive/1.5.3/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
 this sketch where they differ -- count > capacity keeps physical n x push parity (head = (head + count) & mask, not
 head = 0); src is Float32Array / Float64Array only (other TypedArrays, BigInt included, TypeError); `set` only for a
 whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c). Post-release light audit 2026-11-15 (one Opus reviewer, read-only, eef921f / eaa32ee7 vs 3860688 / ff6ee762): FINDINGS, no DEFECT -- 3 DOC fixed in the working tree (README destroy / batch-ingest wording, .d.ts frozen count-0), 2 JSDoc NITs deferred to the next unit touching RingBuffer.js, 1 test gap (no alloc lane for a resizable-buffer / other-realm `src`; resizable-buffer views measured <= 0.25 B/op untimed, REPORTED; other-realm not measured) left as a FILLER. Evidence .handoff/audit-1.4.0/.
@@ -268,7 +268,7 @@ deadline rule above is superseded by that research burst: it adopts M1 only on a
 else records the null result here and drops M1. (This M1 is the Parked item, not the "M1 unpark unit", the copyLast
 chain fix shipped in 1.5.1.)
 
-DROPPED 2026-11-15. The research burst (spike-first ladder, `.handoff/research/m1-twospan/`) ran the same day and
+DROPPED 2026-11-15. The research burst (spike-first ladder, `.handoff/archive/1.5.3/research/m1-twospan/`) ran the same day and
 found a measured LOSS, not only no win. Two two-span candidates (C1, C2) were timed against the shipped masked
 `forEach` (REF) on a `store` callback (`OUT[i] = v`), K 21 x 3 compilations, on the wrapped full ring (`wrap` rows,
 the steady state of a telemetry ring and the only layout where the walk has two spans). Both strict runs (REPORTED,
@@ -285,7 +285,7 @@ no WIN row (h0 LOSS 1.045-1.061). The earlier PRELIMINARY rung 1b run on the sam
 modes, so no A/B on it carries a verdict (LEDGER D17). Rung 3 (the `copyTo` loop, "only if rung 1 showed a win") never
 ran: it has no premise, so the `copyTo` half is dropped with `forEach`, unmeasured. Maintainer ruling
 (AskUserQuestion, 2026-11-15): "Strict re-run, then drop". Sources: LEDGER A7 / D17 and
-`.handoff/research/m1-twospan/PROGRESS.md`.
+`.handoff/archive/1.5.3/research/m1-twospan/PROGRESS.md`.
 
 Reopen condition (law 13): a new mechanism that removes the wrap-row cost (a two-span walk no slower than the masked
 one on a full wrapped ring), re-measured by the same strict A/B (interleaved, K x 3 compilations, `quiet-lock run

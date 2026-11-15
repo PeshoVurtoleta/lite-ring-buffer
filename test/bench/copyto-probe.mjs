@@ -1,6 +1,6 @@
 // copyto-probe.mjs -- ONE (n, dst type, layout) config x ONE compilation of the copyTo A/B bench.
 // Spawned by test/bench/copyto-ab.mjs (never run by `npm test` / `npm run verify`); prints one JSON line.
-// Port of the R1 research harness v4 (.handoff/research/r1/probe-copyto.mjs) to the REAL modules.
+// Port of the R1 research harness v4 (.handoff/archive/1.5.3/research/r1/probe-copyto.mjs) to the REAL modules.
 //
 //   node --allow-natives-syntax --expose-gc test/bench/copyto-probe.mjs
 //        --before FILE --before-sha8 HEX --after FILE --after-sha8 HEX

@@ -1,6 +1,6 @@
 // pushbatch-probe.mjs -- ONE (chunk, src type, layout) config x ONE compilation of the pushBatch A/B bench.
 // Spawned by test/bench/pushbatch-ab.mjs (never run by `npm test` / `npm run verify`); prints one JSON line.
-// Port of copyto-probe.mjs and of the R2 research probe (.handoff/research/r2/probe-pushbatch.mjs: layouts,
+// Port of copyto-probe.mjs and of the R2 research probe (.handoff/archive/1.5.3/research/r2/probe-pushbatch.mjs: layouts,
 // values) to the REAL modules.
 //
 //   node --allow-natives-syntax --expose-gc test/bench/pushbatch-probe.mjs

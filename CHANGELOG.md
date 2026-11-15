@@ -10,6 +10,15 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Docs
+
+- README "Why" item 2 now says it describes the naive `push` / `shift` array, not a preallocated Array ring, points to the Comparison section, and no longer says every entry is a boxed double (boxing only when values leave the packed-double path); the "Naive Array" diagram's push node matches.
+- The out-of-contract note for the `copyLast` / `copyLastFast` checks (README, `llms.txt`, `RingBuffer.d.ts`, and the matching `RingBuffer.js` comments; comments only, no code change) now names the whole class: anything that changes what the intrinsic length getter's `call` resolves to (replacing or deleting `Function.prototype.call`, an own `call` property on the getter, or a changed prototype of the getter).
+
+### Tests
+
+- `test/bench/compare.mjs` (dev-only, not shipped): the probe-output accept check is now a pure `acceptProbe` with self-test cases for every clause (self-test 106 -> 125 checks); a bare run's default output dir is `.handoff/bench-compare/compare-<ISO>/`.
+
 ## [1.5.3] - 2026-11-15
 
 ### Docs

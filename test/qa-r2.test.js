@@ -2,7 +2,7 @@
 // INTRINSIC TypedArray getters (length, buffer, toStringTag), never through
 // properties a subclass or another realm can change. Each test closes a gap a
 // named mutant of build ff6ee762 survived in the rest of the suite
-// (.handoff/R2/qa/mutants/): q-default-length-prop, q-set-length-prop,
+// (.handoff/archive/1.4.0/R2/qa/mutants/): q-default-length-prop, q-set-length-prop,
 // q-src-instanceof, q-alias-prop, q-data-buf-prop. The last two tests pin the
 // maintainer rulings Q-R2-DESTROY and Q-R2-DETACH (2026-11-14, documented as-is);
 // controls q-destroyed-throw and q-detached-throw.

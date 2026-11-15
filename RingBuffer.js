@@ -333,9 +333,10 @@ function lastNError(name, n) {
  * reference: nothing is retained. Shared by every ring and by both
  * `copyLast` and `copyLastFast`; correct because nothing within the contract
  * runs between the hot write and the cold read (the one call in that window
- * is the intrinsic length getter's `call`; a replaced
- * `Function.prototype.call`, or a user-defined own `call` property on that
- * getter, would run user code in that window and is unsupported). The file's
+ * is the intrinsic length getter's `call`; anything that changes what that
+ * `call` resolves to -- a replaced or deleted `Function.prototype.call`, an
+ * own `call` property on the getter, a changed prototype of the getter --
+ * would run user code in that window and is unsupported). The file's
  * only `var`: a module `let` costs 7 B of the chain's 1 B margin (LEDGER
  * A15 R3-M2).
  */
@@ -413,9 +414,11 @@ function lastStateError(rb, data, dst, name) {
  * times than 1.5.0. A bounds failure with `n` and `dstOffset` both
  * non-negative integers reads `dst`'s length twice (the hot body, then
  * `lastArgError`); on an `n` / `dstOffset` failure the hot body never
- * reads it. A replaced builtin or `Function.prototype.call` is unsupported
- * (out of contract). A failing alias / storage call re-reads the intrinsic
- * getters.
+ * reads it. A replaced builtin, or anything that changes what the length
+ * getter's `call` resolves to (a replaced or deleted
+ * `Function.prototype.call`, an own `call` property on the getter, a changed
+ * prototype of the getter), is unsupported (out of contract). A failing
+ * alias / storage call re-reads the intrinsic getters.
  *
  * The inlined chain copyLast + lastCheck + rotCopy is held at <= 766 B of
  * bytecode (V8's cumulative-inlining reserve, 920 / 1.2; 765 B on the
@@ -832,11 +835,12 @@ export class RingBuffer {
      * unchanged from 1.5.0, and a view `dst` sees exactly one
      * `dst instanceof DataView` per call (a user `DataView[Symbol.hasInstance]`
      * runs once). The checks call the global `ArrayBuffer.isView`,
-     * `Number.isInteger` and `DataView` at call time; a replaced builtin or
-     * `Function.prototype.call` is unsupported (see `lastCheck`). The checks
-     * live in a shared helper (`lastCheck`, also used by `copyLastFast`).
-     * The alias cache (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch`
-     * use, with the same rules (see `copyTo`).
+     * `Number.isInteger` and `DataView` at call time; a replaced builtin, or
+     * anything that changes what the length getter's `call` resolves to, is
+     * unsupported (see `lastCheck`). The checks live in a shared helper
+     * (`lastCheck`, also used by `copyLastFast`). The alias cache
+     * (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch` use, with the
+     * same rules (see `copyTo`).
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number|undefined} dstOffset undefined means 0.

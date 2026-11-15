@@ -254,9 +254,11 @@ export class RingBuffer implements Iterable<number> {
      * `Number.isInteger` more often, and a bounds failure with a valid
      * `dstOffset` reads `dst`'s length twice. The checks use the GLOBAL
      * `ArrayBuffer.isView`, `Number.isInteger`, `DataView` and the intrinsic
-     * length getter's `call` at call time; replacing any of them, replacing
-     * `Function.prototype.call`, or giving that getter an own `call` property
-     * is unsupported (out of contract).
+     * length getter's `call` at call time; replacing any of them, or
+     * anything that changes what that getter's `call` resolves to (replacing
+     * or deleting `Function.prototype.call`, an own `call` property on the
+     * getter, or a changed prototype of the getter), is unsupported (out of
+     * contract).
      *
      * ALLOCATION: 0 B in steady state under the same rule as {@link copyTo}:
      * each of its three store sites (a Float32Array `dst`, a Float64Array

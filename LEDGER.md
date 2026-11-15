@@ -8,8 +8,8 @@ gate the entry names.*
 Scope: `@zakkster/lite-ring-buffer` (RingBuffer, ceilPow2). Sources: `git log`, `CHANGELOG.md`,
 `ROADMAP.md`, `.handoff/HISTORY.md`, `.handoff/D/PLAN.md`, `.handoff/D2/PLAN.md` and the evidence
 dirs under them (all `.handoff/` is gitignored), the headers of `test/alloc.mjs`,
-`test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, `.handoff/research/r1/` and
-`.handoff/PROPOSAL-r1.md` (R1 step 1), `.handoff/research/m1-twospan/`, and the auto-memory note
+`test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, `.handoff/archive/1.5.3/research/r1/` and
+`.handoff/archive/1.5.3/PROPOSAL-r1.md` (R1 step 1), `.handoff/archive/1.5.3/research/m1-twospan/`, and the auto-memory note
 `alloc-gate-total-allocated-bytes`.
 Numbers are copied from those sources as they state them; a number with no date / host / run
 count there carries none here either, and says so.
@@ -190,8 +190,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   1024 and 8192 and no loss row. (M1 here is the Parked item, not the "M1 unpark unit".)
 - **Root cause.** M2, R4: no consumer. M1: a measured loss (a two-span walk costs more than the masked one on a
   wrapped full ring), not only "no win"; "an engine detail is not a reason to ship code".
-- **Evidence.** ROADMAP.md "Parked"; b6a8310; `.handoff/research/m1-twospan/PROGRESS.md`;
-  `.handoff/research/m1-twospan/runs/strict/store-1/ab.md`; `.../runs/strict/store-2/ab.md`;
+- **Evidence.** ROADMAP.md "Parked"; b6a8310; `.handoff/archive/1.5.3/research/m1-twospan/PROGRESS.md`;
+  `.handoff/archive/1.5.3/research/m1-twospan/runs/strict/store-1/ab.md`; `.../runs/strict/store-2/ab.md`;
   `.../runs/rung1b/store/ab.md` (PRELIMINARY).
 - **Law.** 13.
 - **Gate.** None (STATISTICAL, by hand).
@@ -217,7 +217,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `.handoff/LU2/evidence/qa-deopt-diff.log`). R1's FC build (eab8983a) read 0 deopts on f32; this build is 1.3.0
   (eaa32ee7), so the builds differ -- not a regression claim (no deopt loop). `pushBatch` had no candidate yet: the
   LU2 driver did not call it, so `--fn pushBatch` reads NO-VERDICT until the before side has pushBatch. The R2 build
-  (ff6ee762) extends the driver with a guarded pushBatch phase (`test/tools/deopt-driver.mjs`); `--fn copyTo,pushBatch` still reads NO-VERDICT for pushBatch while git HEAD (eef921f) lacks it (`.handoff/R2/reported/deopt-diff.log`, exit 2; `--fn copyTo` alone: f32 SAME, f64 SAME, control DIFF, `.handoff/R2/reported/deopt-diff-copyTo.log`); a verdict needs the post-commit run (PLAN-G1 A2 FILLER). Post-commit run (FILLER R2-5, release 1.4.0 burst), 1 run (deopt-diff.sh --runs 3 per side), 2026-11-14T21:50:17Z, Node v26.8.2, HEAD f03561c vs the working tree, both RingBuffer.js ff6ee762 (byte-identical, so an A/A null control, not a before / after), host QUIET (load1 2.59 vs baseline 2.21): exit 0, control DIFF; `pushBatch` f32 SAME and f64 SAME, 0 deopts on both sides, MAGLEV -> TURBOFAN_JS, 0 cycles; `copyTo` f32 SAME (1 deopt each side, as in LU2), f64 SAME (0 deopts) (REPORTED, decides nothing; `.handoff/release-1.4.0/deopt-diff-copyTo-pushBatch.log`). It shows only that the driver drives `pushBatch` to TurboFan without a deopt; the next `RingBuffer.js` change gets the first real before / after read.
+  (ff6ee762) extends the driver with a guarded pushBatch phase (`test/tools/deopt-driver.mjs`); `--fn copyTo,pushBatch` still reads NO-VERDICT for pushBatch while git HEAD (eef921f) lacks it (`.handoff/archive/1.4.0/R2/reported/deopt-diff.log`, exit 2; `--fn copyTo` alone: f32 SAME, f64 SAME, control DIFF, `.handoff/archive/1.4.0/R2/reported/deopt-diff-copyTo.log`); a verdict needs the post-commit run (PLAN-G1 A2 FILLER). Post-commit run (FILLER R2-5, release 1.4.0 burst), 1 run (deopt-diff.sh --runs 3 per side), 2026-11-14T21:50:17Z, Node v26.8.2, HEAD f03561c vs the working tree, both RingBuffer.js ff6ee762 (byte-identical, so an A/A null control, not a before / after), host QUIET (load1 2.59 vs baseline 2.21): exit 0, control DIFF; `pushBatch` f32 SAME and f64 SAME, 0 deopts on both sides, MAGLEV -> TURBOFAN_JS, 0 cycles; `copyTo` f32 SAME (1 deopt each side, as in LU2), f64 SAME (0 deopts) (REPORTED, decides nothing; `.handoff/release-1.4.0/deopt-diff-copyTo-pushBatch.log`). It shows only that the driver drives `pushBatch` to TurboFan without a deopt; the next `RingBuffer.js` change gets the first real before / after read.
 
 ### A9. allocation-diff REFUSED (unit LU)
 
@@ -251,8 +251,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Root cause.** At 1024 / Float32 the masked loop takes ~457 ns per call vs 73-99 ns for set + subarray;
   only a view-free `set` (whole storage) plus `copyWithin` moves the bulk without allocating, and ROT still
   loops over the smaller half (0.71x-3.15x of today's call, PROPOSAL F4).
-- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/PROPOSAL-r1.md` (RULINGS, section 2),
-  `.handoff/research/r1/PROGRESS.md`; `.handoff/PROPOSAL-r1b.md` RULINGS (Q-R1B-ROUTER). 4.7x-6.3x from
+- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/archive/1.5.3/PROPOSAL-r1.md` (RULINGS, section 2),
+  `.handoff/archive/1.5.3/research/r1/PROGRESS.md`; `.handoff/archive/1.5.3/PROPOSAL-r1b.md` RULINGS (Q-R1B-ROUTER). 4.7x-6.3x from
   `runs/v2/rung-1024-v2.md` (2026-11-11T05:38Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1
   1.55 -> 1.56, QUIET non-strict, 3 compilations x 21 rounds); ~12x from `runs/rung-16384-v3.md` (wrap row
   only, host PRELIMINARY, load1 3.07 -> 3.15, run exit 1). All PRELIMINARY (strict hold PENDING).
@@ -267,7 +267,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **What happened.** V-onebuf cached `this.data`'s buffer at construction to save one ~5 ns getter call.
 - **Root cause.** `data` is `readonly` only in the .d.ts; at runtime it is a writable field. A caller that
   assigns `rb.data` would leave the cached buffer stale, so the alias check fails OPEN for that caller.
-- **Evidence.** `.handoff/research/r1b/variants/V-onebuf/` (03d1434f); `.handoff/PROPOSAL-r1b.md` section 6.
+- **Evidence.** `.handoff/archive/1.5.3/research/r1b/variants/V-onebuf/` (03d1434f); `.handoff/archive/1.5.3/PROPOSAL-r1b.md` section 6.
 - **Law.** 2.
 - **Gate.** None (refusal). Reopen only with a cache that re-reads the intrinsic getter whenever `rb.data` is
   not the cached array (V-split32c's `bufOf` key, written only AFTER the getter returned), with node:test cases
@@ -275,11 +275,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   TypeError on EVERY call: the review-caught fail-open of 54279dbe, which keyed the cache before the read).
   Held today by `test/copyto-r1b.test.js` A1a / A1b (B7).
 - **RULING.** Q-R1B-FIX = "V-split32c" (identity-keyed cache, key written after the read), maintainer,
-  2026-11-11, AskUserQuestion (`.handoff/PROPOSAL-r1b.md` RULINGS); V-onebuf was not chosen.
+  2026-11-11, AskUserQuestion (`.handoff/archive/1.5.3/PROPOSAL-r1b.md` RULINGS); V-onebuf was not chosen.
 
 ### A13. pushBatch bodies refused by the R2 research pass: one shared loop, Float64 `set`, two spans, inline families
 
-- **What happened.** The R2 research pass (2026-11-12, `.handoff/research/r2/`, build a6d0220 / eaa32ee7) compared
+- **What happened.** The R2 research pass (2026-11-12, `.handoff/archive/1.5.3/research/r2/`, build a6d0220 / eaa32ee7) compared
   pushBatch bodies against a caller's `push` loop. Refused: (1) one masked loop shared by every src kind (MASK):
   0 B monomorphic, but its src LOAD site boxes every sample once it has seen > 4 src classes (2042 B per 128-sample
   call), and ONE `pushBatch(BigInt64Array)` call -- which throws TypeError and writes nothing -- leaves it boxing
@@ -294,23 +294,23 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   passes doubles tagged, so it boxes (B8, now on the load side); a store site that once saw a BigInt goes generic
   even though the store threw. `TypedArray.prototype.set` converting float64 -> float32 is slower than TurboFan's
   per-element loop (inferred from timings, not from V8 source).
-- **Evidence.** `.handoff/research/r2/PROGRESS.md` rung 0 (`runs/rung0-check.json`, `rung0-check-v2.json`;
+- **Evidence.** `.handoff/archive/1.5.3/research/r2/PROGRESS.md` rung 0 (`runs/rung0-check.json`, `rung0-check-v2.json`;
   untimed, counter-based, D6 v4 harness), rungs 1-2 (`runs/rung1.md` QUIET non-strict exit 2, `runs/rung2.md`
   PRELIMINARY exit 1 with n = 1024 VOID; 2026-11-12T08:09Z-08:15Z, Apple M4 Pro, Node v26.8.2 / V8
-  14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY); `.handoff/PROPOSAL-r2.md` section 4.
+  14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY); `.handoff/archive/1.5.3/PROPOSAL-r2.md` section 4.
 - **Law.** 1, 4, 7 (and zero-box): a doc claim that pushBatch allocates nothing covers the > 4-class and the
   after-a-BigInt-call paths.
 - **Gate.** `test/alloc.mjs` pushBatch lanes (7 plain, BIGINT, MEGA F32 / F64) with must-allocate controls
   `maskBig` and `maskMega` (F32 / F64), ~2048 B per call; the torture lane `pushBatch 1024 set+slice+F64+over-cap`
   (major 0 / minor 0); `npm run bench:pushbatch` (STATISTICAL, dev-only, not in verify). Strict run of record
-  `.handoff/R2/ab/strict-1/` (build ff6ee762, `quiet-lock run --strict` exit 0, QUIET at start, load1 3.17 -> 3.57,
+  `.handoff/archive/1.4.0/R2/ab/strict-1/` (build ff6ee762, `quiet-lock run --strict` exit 0, QUIET at start, load1 3.17 -> 3.57,
   2026-11-14T21:17:48Z-21:18:41Z, Apple M4 Pro, Node v26.8.2, K 21 x 3 compilations): push loop faster at chunks 1 / 8
   (all 8 cells SLOWER), pushBatch faster at 32 / 128 (all 12 cells FASTER), every A/A median 0.968-1.024, SLOW/CAND
   >= 2.44. Provenance caveat: a docs helper's `npm test` may have overlapped part of the 52 s window; the A/A bands held.
   Per R2-4, no chunk-1 multiplier is quoted (constant-count folding in the harness). Reopen (1) / (4) only with a body that clears those lanes and
   stays under 460 B; (2) only with a strict A/B where Float64 `set` beats the loop; (3) only with a new mechanism
   (FILLER 2 / A7 rule).
-- **RULING.** Q-R2-PARITY = "A Physical parity"; Q-R2-ALIAS = "A RangeError, read every call"; Q-R2-TYPES = "B Float32/Float64 only"; Q-R2-BIGINT = "A TypeError up front"; Q-R2-SMALL = "A Document it"; Q-R2-STRICT = "A Rule now, strict in build". Maintainer, 2026-11-12, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r2.md` section 7).
+- **RULING.** Q-R2-PARITY = "A Physical parity"; Q-R2-ALIAS = "A RangeError, read every call"; Q-R2-TYPES = "B Float32/Float64 only"; Q-R2-BIGINT = "A TypeError up front"; Q-R2-SMALL = "A Document it"; Q-R2-STRICT = "A Rule now, strict in build". Maintainer, 2026-11-12, AskUserQuestion, one sitting (`.handoff/archive/1.5.3/PROPOSAL-r2.md` section 7).
 - **RULING.** Q-R2-FROZEN = "A TypeError, nothing written"; Q-R2-DATA = "A Float32Array only" + "TypeError";
   Q-R2-TAMPER = "A Doc-scope only" (the three lines added to PROPOSAL-r2 section 7 during the build). In effect:
   Q-R2-FROZEN: `head` / `count` are stored before the first data store, so a frozen ring throws TypeError
@@ -339,7 +339,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   deterministic per V8 build only, so by hand / at release, never in `npm test`.
 - **UNPARKED (bytecode-budget only) by the R2 build, 2026-11-14.** GATE `--max pushBatch=459,batchCheck=459
   --node-version v26.8.2` exit 0 (pushBatch 322 B, batchCheck 294 B) plus a padded must-fail control (pushBatch
-  736 B, exit 1), run by hand, never in `npm test` (`.handoff/R2/b1fix/gate-3-budget-live.log`,
+  736 B, exit 1), run by hand, never in `npm test` (`.handoff/archive/1.4.0/R2/b1fix/gate-3-budget-live.log`,
   `gate-3-budget-padded.log`). ic-diff stays parked.
 
 ### A15. copyLast bodies refused by the R3 research pass: shared check helper, one shared body, no ROT
@@ -561,7 +561,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   ring half is a JS loop, or a view-free `set` of the whole storage plus `copyWithin` (ROT).
 - **Evidence.** Before: e3e1df1 / 0412025; `CHANGELOG.md` [1.2.0] Changed; `.handoff/HISTORY.md` 2026-10-14
   release burst: `copyTo 33 contig 103.8 B/op`, `copyTo 64 wrapped 207.9 B/op` (Node 26.8.2 arm64, load average
-  4.11, one run). The loop-vs-`set` research (2026-11-11, `.handoff/research/r1/`, PRELIMINARY): at 32 samples
+  4.11, one run). The loop-vs-`set` research (2026-11-11, `.handoff/archive/1.5.3/research/r1/`, PRELIMINARY): at 32 samples
   the loop is 1.7x-3.9x faster than set + subarray, the Float32 crossover is 64..256 and at 1024 / Float32 the
   loop costs 4.7x-6.3x of set + subarray (QUIET non-strict, 3 compilations x 21 rounds, Apple M4 Pro, Node
   v26.8.2, load1 1.54..1.73). After: 99e8749 (R1 build), 5ae2266 (`npm run bench:copyto`), R1b fix in the
@@ -624,9 +624,9 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   read the next call skipped the check: a fail-open caught in the R1b research review (fixed in b93aab2c).
 - **Root cause.** A bulk copy over two halves of one storage with no overlap check; then a cache keyed before it
   was validated (law 2).
-- **Evidence.** `.handoff/PROPOSAL-r1.md` Q-R1-ALIAS (`research/r1/runs/controls/review/alias-check.mjs` +
+- **Evidence.** `.handoff/archive/1.5.3/PROPOSAL-r1.md` Q-R1-ALIAS (`research/r1/runs/controls/review/alias-check.mjs` +
   `.log`); 99e8749; `.handoff/HISTORY.md` R1b research pass (54279dbe archived in
-  `.handoff/research/r1b/variants/archive/`); `test/copyto-r1b.test.js` (A1a / A1b are regression pins on the
+  `.handoff/archive/1.5.3/research/r1b/variants/archive/`); `test/copyto-r1b.test.js` (A1a / A1b are regression pins on the
   frozen before build; the 54279dbe build fails A1b, `tap-FAILOPEN.tap`); `.handoff/r1b-fix/evidence/tap-FAILOPEN.tap`.
 - **Law.** 1, 2.
 - **Gate.** `test/copyto-r1b.test.js` A1a / A1b; the R1 alias cases in `test/copyto.test.js`; Q-R1-ALIAS ruling
@@ -702,7 +702,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Fix.** Q-R2-DATA: an intrinsic `Symbol.toStringTag` check of `data` on every call (count > 0), before the alias
   cache is read or written (ff6ee762). Residual per Q-R2-TAMPER: per-property tampering (a non-writable `count`
   alone, accessors on `head` / `count` / `data`) is unsupported and may leave `head` written, as with `push`.
-- **Evidence.** d4445574 (rejected build), ff6ee762 (fixed build); `.handoff/R2/frozen-b1/`, `.handoff/R2/b1fix/`, `.handoff/R2/review-b1fix/`.
+- **Evidence.** d4445574 (rejected build), ff6ee762 (fixed build); `.handoff/archive/1.4.0/R2/frozen-b1/`, `.handoff/archive/1.4.0/R2/b1fix/`, `.handoff/archive/1.4.0/R2/review-b1fix/`.
 - **Law.** 1, 2.
 - **Gate.** `test/pushbatch.test.js`, describe "replaced storage element type (Q-R2-DATA)" (28 tests). Re-opens if
   `data` may be anything but a Float32Array of `capacity` slots.
@@ -780,13 +780,13 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 ### C4. GC-count gates have a resolution
 
-- **What happened.** The reviewer's mutant M-rare (about 0.8 B/op net) passed torture (reviewer / coder report recorded in `.handoff/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated); `test/alloc.mjs`
+- **What happened.** The reviewer's mutant M-rare (about 0.8 B/op net) passed torture (reviewer / coder report recorded in `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated); `test/alloc.mjs`
   caught it (`copyTo` 32 contiguous at 15.8 B/op). So torture `minor 0` proves "less than res B/op",
   not "0 B/op". Torture prints `res=` (CONTROL lane B/op divided by its minor-GC count); docs state
   no value, only that it is nominal and depends on V8 new-space size.
 - **Root cause.** A GC count is a threshold on bytes, and the threshold is the new-space size.
 - **Evidence.** 1d6e368 / b6a8310; `test/torture.mjs` header (res= definition); `CHANGELOG.md`
-  [Unreleased] Tests; M-rare run: `.handoff/reviews/2026-11-10-findings.md` (D B2+B3 reviewer: a box on copyTo's start===0 branch printed GATE ok in torture; alloc.mjs exit 1; reviewer scratch mutant not kept).
+  [Unreleased] Tests; M-rare run: `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md` (D B2+B3 reviewer: a box on copyTo's start===0 branch printed GATE ok in torture; alloc.mjs exit 1; reviewer scratch mutant not kept).
 - **Law.** 3.
 - **Gate.** `test/alloc.mjs` is the per-op byte gate; torture `res=` is printed, never gated.
 
@@ -806,13 +806,13 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 ### C6. `count.mjs` v1 dropped per-file summary events
 
 - **What happened.** A 60th test calling `process.exit(0)` after 400 ms gave `pass 59/59`, exit 0
-  (4 of 4 runs on the v1 gate (reviewer / coder report recorded in `.handoff/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated)). Fix: count file summaries and require them to equal `files.length`.
+  (4 of 4 runs on the v1 gate (reviewer / coder report recorded in `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated)). Fix: count file summaries and require them to equal `files.length`.
   With the fix the same mutant exits 1 (3 of 3 runs); without it exit 0 (3 of 3).
 - **Root cause.** The gate tallied `test:pass` events and ignored that a file can die before its
   summary.
 - **Evidence.** b6a8310; `.handoff/D2/evidence/fix1-dexit-fixed-run1..3.txt` ("count: file summary
   events: 0 (want 1)", `exit=1`) and `fix1-dexit-prefix1-run1..3.txt` (`pass 59/59`, `exit=0`);
-  the v1 "4 of 4 runs" figure (a 60th test exiting after 400 ms, 1 summary event instead of 2): `.handoff/reviews/2026-11-10-findings.md` (D2 B1 reviewer round 1).
+  the v1 "4 of 4 runs" figure (a 60th test exiting after 400 ms, 1 summary event instead of 2): `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md` (D2 B1 reviewer round 1).
 - **Law.** 1, 2, 11.
 - **Gate.** `test/count.mjs` file-summary count. Its must-fail controls are scratch only, not committed:
   `.handoff/D2/mut/*.test.js`, logs `.handoff/D2/evidence/fix1-mut-*.txt` (gitignored).
@@ -855,7 +855,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   07:50Z exit 0, host PRELIMINARY (load1 3.63 vs baseline 2.21), Node v26.8.2.
 - **Root cause.** A status line written from the plan, not from a log.
 - **Evidence.** b6a8310; ROADMAP.md D2 STATUS; `.handoff/D2/qa/q7-verify.txt` (`verify_lock_run_exit=0`,
-  "host PRELIMINARY (load1 3.63, baseline 2.21, 12 cores ...)"). The REJECT: `.handoff/reviews/2026-11-10-findings.md` (D2 B2 reviewer: the only D2 verify, 07:24Z, hit a BUSY lock, ran unlocked at load1 31.53 and predated the count.mjs fix; line set to PENDING until qa's 07:50Z locked run).
+  "host PRELIMINARY (load1 3.63, baseline 2.21, 12 cores ...)"). The REJECT: `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md` (D2 B2 reviewer: the only D2 verify, 07:24Z, hit a BUSY lock, ran unlocked at load1 31.53 and predated the count.mjs fix; line set to PENDING until qa's 07:50Z locked run).
 - **Law.** 5, 6.
 - **Gate.** Reviewer doc-truth check; no automation.
 
@@ -1035,7 +1035,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Fix.** `rounds` length == K >= 5 per compilation, the probe's K is checked, a host tag is on the QUOTE lines, every per-round ratio is finite and > 0, VOID rows mask their ns cells, and the MOD / MOD_NP2 capacities are named on the QUOTE lines (COL_NOTE label).
 - **Evidence.** compare.mjs 2eea7409 -> 21a15822; `.handoff/archive/1.5.3/B1/reviews/code-review.md`; fix-revert runs `.handoff/archive/1.5.3/B1/coder/mut/fix.{rounds,perround,hosttag,nsmask}.out`.
 - **Law.** 1, 2.
-- **Gate.** `node test/bench/compare.mjs --self-test` (106 checks; reverting the rounds, per-round-ratio, host-tag, ns-mask or COL_NOTE-label fix turns it red; the probe-K accept check, compare.mjs:518, has no self-test case).
+- **Gate.** `node test/bench/compare.mjs --self-test` (125 checks; reverting the rounds, per-round-ratio, host-tag, ns-mask or COL_NOTE-label fix turns it red; the probe-output accept check acceptProbe, compare.mjs:226, called at :547, has one reject case per clause and dropping any clause turns it red).
 
 ---
 
@@ -1066,7 +1066,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **What happened.** One 2M-op call per lane entered in a low tier and reached TurboFan only by
   OSR part-way through; an empty `SINK[k] += x` loop measured 32-48 B/op (`--trace-opt`, Node
   26.8.2), so the minor count hung on when the background compile landed. Fix: 1000-op calls
-  (`CHUNK`) and 300k warmup (`WARM`) outside the window; no budget widened. The same loop read 15-23 minor GCs (`.handoff/reviews/2026-11-10-findings.md`, D B3 coder report, `--trace-opt`).
+  (`CHUNK`) and 300k warmup (`WARM`) outside the window; no budget widened. The same loop read 15-23 minor GCs (`.handoff/archive/1.5.3/reviews/2026-11-10-findings.md`, D B3 coder report, `--trace-opt`).
 - **Root cause.** A long single call defeats optimized entry; low tiers box doubles.
 - **Evidence.** 1d6e368; `test/torture.mjs` header and lines about `CHUNK` / `WARM` (comment "an empty
   `SINK[k] += x` loop measured 32-48 B/op that way, --trace-opt Node 26.8.2"); `.handoff/D/b3/`
@@ -1079,7 +1079,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 ### D4. `res=` drifts, and a derived number is not a measurement
 
 - **What happened.** `res=` read 2.13 B/op (`.handoff/D2/qa/q3-torture-batch.txt`, 2026-11-10 07:50Z, Node v26.8.2, quiet-lock free, host PRELIMINARY load1 3.63 vs baseline 2.21);
-  a second run read 0.53 B/op (half-track run, load1 13-76, unlocked, PRELIMINARY; `.handoff/reviews/2026-11-10-findings.md`, D2 B1 reviewer). The docs therefore state no value and label it nominal. Unit D's committed
+  a second run read 0.53 B/op (half-track run, load1 13-76, unlocked, PRELIMINARY; `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md`, D2 B1 reviewer). The docs therefore state no value and label it nominal. Unit D's committed
   docs (1d6e368: README Testing, llms.txt, CHANGELOG [Unreleased]) said "about 2 B/op", a derivation
   (104.2 B/op x 2,000,000 / 49 minors); unit D qa flagged it as derived, not measured; b6a8310 removed
   the value.
@@ -1093,7 +1093,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 ### D5. A vitest run also picked up the frozen copy under `.handoff/`
 
 - **What happened.** A baseline vitest run also collected the frozen copy of the test file under
-  `.handoff/` (a bare `vitest run` reported 118 tests (reviewer / coder report recorded in `.handoff/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated)). The baseline command now excludes it: `npx vitest run RingBuffer.test.js --exclude
+  `.handoff/` (a bare `vitest run` reported 118 tests (reviewer / coder report recorded in `.handoff/archive/1.5.3/reviews/2026-11-10-findings.md`; no run log on disk; no host / load stated)). The baseline command now excludes it: `npx vitest run RingBuffer.test.js --exclude
   .handoff/** --reporter=json` -> 59 tests, 59 passed (vitest 4.1.11, node v26.8.2, darwin-arm64,
   HEAD 0412025).
 - **Root cause.** An unscoped run globs the package tree, frozen builds included.
@@ -1115,7 +1115,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   window, windows interleaved across lanes, the empty window time-matched to its lane.
 - **Root cause.** Absolute counter noise (tens to hundreds of KB per window) divided by a small call
   count; an empty baseline that is not matched to the lane in time or in GC state.
-- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/research/r1/PROGRESS.md` (v1..v4 sections), `runs/v1/`, `runs/v2/`,
+- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/archive/1.5.3/research/r1/PROGRESS.md` (v1..v4 sections), `runs/v1/`, `runs/v2/`,
   `runs/rung-*-v3.*`, harness copies per version (none for v3); Node v26.8.2 / V8 14.6.202.34-node.28, Apple M4
   Pro, 2026-11-11 05:33Z-05:48Z, hosts as each run states (QUIET to PRELIMINARY).
 - **Law.** 3, 4. A probe's B/op lane at >= 20,000 calls per window classifies objects per call (loops
@@ -1132,7 +1132,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   64 / min(n, 1024)) fails it.
 - **Root cause.** The timed layouts are chosen for speed questions; head n/2 is the tie point between
   ROT's two branches and never enters the second.
-- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/research/r1/runs/controls/mut-rot-else.txt` (oracle true, sweep false).
+- **Evidence.** Build under test dc6965f / 43adb369 (frozen); `.handoff/archive/1.5.3/research/r1/runs/controls/mut-rot-else.txt` (oracle true, sweep false).
 - **Law.** 1.
 - **Gate.** None yet (research harness). The R1 build unit's oracle will be the sweep extended with dstOffset > 0 and guards on both sides, as node:test (PROPOSAL-r1 section 6).
 
@@ -1178,9 +1178,9 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   inlining it; the `buffer` getter apparently is not reduced by TurboFan as `length` / `toStringTag` are (all
   inferred from timings: ~4-5 ns per `buffer` read vs <= ~1 ns; not confirmed from V8 source or a trace).
 - **Evidence.** Build under test 5ae2266 (FC eab8983a), FR 132d003 / 43adb369; frozen variants
-  `.handoff/research/r1b/variants/` -- V-noalias bab60068, V-onebuf 03d1434f, V-loop32 1360bb5c, V-split 46c95d02,
+  `.handoff/archive/1.5.3/research/r1b/variants/` -- V-noalias bab60068, V-onebuf 03d1434f, V-loop32 1360bb5c, V-split 46c95d02,
   V-split32 4bb914b8, V-split32c 54279dbe (timed) / b93aab2c (review-fixed; differs only in the cache-miss
-  branch); `.handoff/research/r1b/PROGRESS.md` (rungs 0-2), `runs/timed/analysis-rung0-1.md`,
+  branch); `.handoff/archive/1.5.3/research/r1b/PROGRESS.md` (rungs 0-2), `runs/timed/analysis-rung0-1.md`,
   `analysis-rung2.md`, `runs/untimed/inl-*.log`. Rung 0 / 1: `quiet-lock run` non-strict, 2026-11-11T08:21:59Z-
   08:26:56Z, load1 2.98 at start, 2.75-4.03 over the five runs (rung0-FC and V-onebuf QUIET exit 0; V-noalias /
   V-loop32 / V-split exit 2 PRELIMINARY); rung 2: `run --strict`, 08:35:44Z-08:37:27Z, load1 2.30 -> 3.70, QUIET,
@@ -1193,7 +1193,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (`.handoff/r1b-fix/T5-SUMMARY.md`); `inlining-budget-diff --fn copyTo` reports copyTo's bytecode against 460 B
   (REPORTED).
 - **RULING.** Q-R1B-FIX = "V-split32c"; Q-R1B-ROUTER = "Loop at <= 32" (amends Q-R1 "`COPY_LOOP_MAX` goes",
-  A11); maintainer, 2026-11-11, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r1b.md` RULINGS).
+  A11); maintainer, 2026-11-11, AskUserQuestion, one sitting (`.handoff/archive/1.5.3/PROPOSAL-r1b.md` RULINGS).
 
 ### D11. Identical-source `new Function` probe columns share one feedback vector (R2 research)
 
@@ -1204,7 +1204,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Root cause.** V8's compilation (eval) cache returns the same SharedFunctionInfo and, with it, shared feedback for
   identical source text, so separately built closures are one IC history. R1's probe relied on this for its A/A
   twin (a timing-position A/A, not a second compilation) -- the same mechanism, harmless there.
-- **Evidence.** `.handoff/research/r2/probe-pushbatch.mjs` (`mkCol(..., fresh)`, `NONCE`); first-run vs fixed
+- **Evidence.** `.handoff/archive/1.5.3/research/r2/probe-pushbatch.mjs` (`mkCol(..., fresh)`, `NONCE`); first-run vs fixed
   `runs/rung0-check.json` described in `PROGRESS.md` rung 0 (2026-11-12, Node v26.8.2).
 - **Law.** 4 (a lane must run in the state it claims), 12 (scope every measurement).
 - **Gate.** None (research harness). A probe lane that claims fresh / monomorphic feedback builds its columns from
@@ -1308,7 +1308,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 - **What happened.** The M1 research burst (ROADMAP Parked M1, A7; not the "M1 unpark unit") timed `forEach` with a
   sum callback (`ACC[0] += v`). The masked body ran in two per-compilation modes, ~1.79 vs ~0.68 ns per element
-  (`.handoff/research/m1-twospan/PROGRESS.md`, rung 1; all PRELIMINARY: host noisy, a LiteSignal `--jitless` node at
+  (`.handoff/archive/1.5.3/research/m1-twospan/PROGRESS.md`, rung 1; all PRELIMINARY: host noisy, a LiteSignal `--jitless` node at
   100-127% CPU). Identical bodies in one process read 0.38 or 2.6 of each other at 8192: rung 1 A/A (REF_AA / REF)
   0.456 [0.382..2.566] h0 (`runs/rung1/ab.md`, K 21 x 3, exit 3 VOID); sum6 A/A 0.393 [0.382..1.001] h0 and 2.580
   [1.004..2.641] wrap (`runs/rung1b/sum6/ab.md`, K 21 x 6, exit 3 VOID). At 1024 the candidates read C1/REF 0.379 h0 /
@@ -1322,14 +1322,15 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   modes; the rung 1 hypothesis is refuted), OSR (no driver OSR-compiled), callback not inlined (no call in any inner
   loop), deopt cycles (no driver bailout; forEach bailouts 0-36 do not track the mode), data address (`exp-align.mjs`,
   `align-v2 --same-ring 1`: 1-2 of 16 identical drivers on the SAME data still run slow; 17 / 192 driver runs slow;
-  `align-gc` 6 / 96). `--no-turboshaft-loop-unrolling` made 36 / 36 masked-body (REF / REF_AA / SLOW) compilations run
-  fast (`diag-sum-nounroll`) but one `exp-align` driver read 3.10 ns without unrolling (`align-v1`): suggestive, not a
-  clean condition. Open: REF at 1024 is slow in 6 / 6 (rung 1), 12 / 12 (sum6), 12 / 12 (diag-sum) compilations but
-  6-12% at 1024 in `exp-align`; untested differences: one module per column, BOX in the interleaved warm-up, the B/op
-  lane. A per-code-address CPU effect is an untested hypothesis. Separately, a property of the harness (not tested
-  against the modes): the drivers hold the ring as a closure constant, so TurboFan folds the mask (`#0x3ff`) and bound
+  `align-gc` 6 / 96). 36 / 36 masked-body (REF / REF_AA / SLOW) compilations ran fast under
+  `--no-turboshaft-loop-unrolling` (`diag-sum-nounroll`) but one `exp-align` driver read 3.10 ns without unrolling
+  (`align-v1`): suggestive, not a clean condition. Open: REF at 1024 is slow in 6 / 6 (rung 1), 12 / 12 (sum6), 12 /
+  12 (diag-sum) compilations but 6-12% at 1024 in `exp-align`; untested differences: one module per column, BOX in the
+  interleaved warm-up, the B/op lane. A per-code-address CPU effect is an untested hypothesis. Separately, a property
+  of the harness (not tested against the modes): the drivers hold the ring as a closure constant, so TurboFan folds
+  the mask (`#0x3ff`) and bound
   (`#0x400`), which is more specialised than a production caller.
-  - **Evidence.** `.handoff/research/m1-twospan/PROGRESS.md`; `runs/rung1/ab.md` (2026-11-15T07:47:03Z-07:50:29Z);
+  - **Evidence.** `.handoff/archive/1.5.3/research/m1-twospan/PROGRESS.md`; `runs/rung1/ab.md` (2026-11-15T07:47:03Z-07:50:29Z);
   `runs/rung1b/sum6/ab.md` and `modes.md`; `runs/rung1b/diag-sum/diag.md`; `runs/rung1b/store/ab.md`
   (2026-11-15T08:12:12Z-08:14:06Z); strict `runs/strict/store-1/ab.md` (2026-11-15T16:19:54Z-16:21:42Z) and
   `runs/strict/store-2/ab.md` (2026-11-15T16:21:42Z-16:23:32Z). All sum-callback runs are PRELIMINARY. All: HEAD
@@ -1339,6 +1340,6 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 5 and 12. Lesson: a workload whose per-element cost can shift between two modes per compilation cannot
   carry an A/B verdict; per-compilation medians plus an A/A twin catch it; use a store callback.
 - **Gate.** None (STATISTICAL harness self-check: the A/A twin and the per-compilation mode report in
-  `ab-foreach.mjs`, a research harness under `.handoff/research/m1-twospan/`, not in `npm test`). Reopen only with a
+  `ab-foreach.mjs`, a research harness under `.handoff/archive/1.5.3/research/m1-twospan/`, not in `npm test`). Reopen only with a
   mechanism found for the modes and shown by a clean condition (a run where the mode flips with the condition and
   with nothing else).

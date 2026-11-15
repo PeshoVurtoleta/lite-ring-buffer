@@ -2,7 +2,7 @@
 // provenance); the QUOTE-OP / QUOTE-PUSH lines are what the README may cite. Dev-only: never part of
 // `npm test` / `npm run verify`. A quotable run holds the strict quiet lock:
 //   node ~/.claude/hooks/quiet-lock.mjs run --strict "lite-ring-buffer B1" -- \
-//        node <abs>/test/bench/compare.mjs --out <abs>/.handoff/B1/strict-1
+//        node <abs>/test/bench/compare.mjs --out <abs>/.handoff/bench-compare/strict-1
 //
 //   node test/bench/compare.mjs [--out DIR] [--K 21] [--comp 3] [--control box|aa|slow] [--keep]
 //   node test/bench/compare.mjs --smoke [--out DIR] [--control box|aa|slow] [--keep]
@@ -28,8 +28,9 @@
 // Exit 0 = every row VALID on a QUIET host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID (or a
 // red self-test); 2 = usage / git / staging error or host not quiet.
 // The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases;
-// every real run runs them first, before any spawn.
-// Writes DIR/compare.json and DIR/compare.md; DIR = --out (new or empty), else ROOT/.handoff/B1/compare-<ISO>/.
+// every real run runs them first, before any spawn. The probe-output accept check (acceptProbe: row, both
+// sha256/8, control, smoke, K) is pure and self-tested too.
+// Writes DIR/compare.json and DIR/compare.md; DIR = --out (new or empty), else ROOT/.handoff/bench-compare/compare-<ISO>/.
 // Test tooling only: not shipped.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -221,6 +222,11 @@ function synthRun(row, o = {}) {
     if (o.shortRounds) out.rounds = rounds.slice(0, 6);
     return out;
 }
+// probe-output accept check (pure): want = { row, rb, o1, control, smoke, K } with K the CLI string
+function acceptProbe(j, want) {
+    return !!(j && j.row === want.row && j.sha8 && j.sha8.rb === want.rb && j.sha8.o1 === want.o1 &&
+        j.control === want.control && j.smoke === want.smoke && j.K === Number(want.K));
+}
 function selfTest() {
     const one = (row, o = {}, x = {}) => judge({
         rows: [row], runs: [[synthRun(row, o), synthRun(row, x.perComp2 || o)]], comp: x.comp ?? 2,
@@ -342,6 +348,29 @@ function selfTest() {
             L[0].includes('(% capacity n (pow2, same capacity as MASK))') && L[0].includes('(% capacity n - 1 (not pow2))');
     });
     c('quiet host quote has no PRELIMINARY tag', 0, () => one('wrap-step'), (J) => !renderQuote(J.rows, '/x', false, 'quiet')[0].includes('PRELIMINARY'));
+    // probe accept check: one baseline, one reject per clause (CONTROL is '' when --control is absent)
+    const W = { row: 'push', rb: 'aaaa1111', o1: 'bbbb2222', control: '', smoke: false, K: '21' };
+    const pj = (o = {}) => Object.assign({ row: 'push', sha8: { rb: 'aaaa1111', o1: 'bbbb2222' }, control: '', smoke: false, K: 21 }, o);
+    const acc = (name, want, j) => c('accept ' + name + ' -> ' + want, want, () => ({ exit: acceptProbe(j, W) === true ? 0 : 1 }));
+    acc('baseline', 0, pj());
+    acc('K 20', 1, pj({ K: 20 }));
+    acc('K string', 1, pj({ K: '21' }));
+    acc('K missing', 1, (() => { const j = pj(); delete j.K; return j; })());
+    acc('j null', 1, null);
+    acc('row', 1, pj({ row: 'get' }));
+    acc('sha8 missing', 1, (() => { const j = pj(); delete j.sha8; return j; })());
+    acc('sha8.rb', 1, pj({ sha8: { rb: 'aaaa1112', o1: 'bbbb2222' } }));
+    acc('sha8.o1', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2223' } }));
+    acc('control box', 1, pj({ control: 'box' }));
+    acc('control undefined', 1, pj({ control: undefined }));
+    acc('control null', 1, pj({ control: null }));
+    acc('smoke true', 1, pj({ smoke: true }));
+    acc('smoke missing', 1, (() => { const j = pj(); delete j.smoke; return j; })());
+    acc('control false', 1, pj({ control: false }));
+    acc('smoke 0', 1, pj({ smoke: 0 }));
+    acc('row array', 1, pj({ row: ['push'] }));
+    acc('K 22', 1, pj({ K: 22 }));
+    c('accept control box both -> 0', 0, () => ({ exit: acceptProbe(pj({ control: 'box', smoke: true, K: 5 }), { ...W, control: 'box', smoke: true, K: '5' }) === true ? 0 : 1 }));
     let pass = 0;
     const lines = [];
     for (const [name, want, fn, pred] of cases) {
@@ -422,7 +451,7 @@ const CONTROL = opt['--control'] ?? '';
 if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'aa' && CONTROL !== 'slow') die('--control: box, aa or slow');
 const KEEP = opt['--keep'] === true;
 const T0 = new Date();
-const OUT = resolve(opt['--out'] ?? join(ROOT, '.handoff', 'B1', 'compare-' + T0.toISOString().replace(/[:.]/g, '-')));
+const OUT = resolve(opt['--out'] ?? join(ROOT, '.handoff', 'bench-compare', 'compare-' + T0.toISOString().replace(/[:.]/g, '-')));
 if (existsSync(OUT) && (!statSync(OUT).isDirectory() || readdirSync(OUT).length > 0)) die('--out must be a new or empty dir: ' + OUT);
 if (!isFile(PROBE)) die('probe missing: ' + PROBE);
 
@@ -515,7 +544,7 @@ for (let cpi = 0; cpi < COMP; cpi++) {
         if (r.status === 0 && r.signal === null) {
             try { j = JSON.parse(r.stdout); } catch { j = null; }
         }
-        if (j && j.row === row && j.sha8 && j.sha8.rb === rbSha8 && j.sha8.o1 === o1Sha8 && j.control === CONTROL && j.smoke === SMOKE && j.K === Number(K)) {
+        if (acceptProbe(j, { row, rb: rbSha8, o1: o1Sha8, control: CONTROL, smoke: SMOKE, K })) {
             runs[i].push(j);
             process.stdout.write('ran ' + tag + '\n');
         } else {
