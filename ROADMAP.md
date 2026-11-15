@@ -170,6 +170,13 @@ each for Float32 and Float64 `src`.
 
 ### R3 -- `copyLast(dst, dstOffset, n)`: copy only the newest n samples, oldest-first
 
+RULED 2026-11-15 (research pass, `.handoff/PROPOSAL-r3.md` section 7, LEDGER A15): the ruled PROPOSAL supersedes this
+sketch where they differ -- the bounds check is `dstOffset + n <= dst.length` (n, not k; Q-R3-BOUNDS); k = 0 returns 0
+before the alias / storage checks; copyLast has its own check helper and store sites, copyTo stays byte-identical
+(Q-R3-BODY); a `copyLastFast(dst, dstOffset, n)` (allocating `set` + `subarray`, the copyToFast pattern) is added
+(Q-R3-FAST); copyLast(count) is slower than copyTo on a full Float32 ring (PRELIMINARY, mechanism unknown), the
+parity gate is output / throw only (Q-R3-PARGAP); the strict A/B runs in the build unit (Q-R3-STRICT).
+
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.
 - Copies `min(n, count)` samples, oldest-first, ending at the newest; returns the number copied.

@@ -60,7 +60,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
-   lane must run in optimized code. *(B2, C8, D1, D2, D3, D6)*
+   lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
    derived from another measurement is not a measurement. *(A11, B4, C9, D4)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
@@ -79,7 +79,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
     file must fail the run. *(C5, C6, C10, C15)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
     copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11, C15)*
-13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A14)*
+13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A15)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
 ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
@@ -322,6 +322,41 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   --node-version v26.8.2` exit 0 (pushBatch 322 B, batchCheck 294 B) plus a padded must-fail control (pushBatch
   736 B, exit 1), run by hand, never in `npm test` (`.handoff/R2/b1fix/gate-3-budget-live.log`,
   `gate-3-budget-padded.log`). ic-diff stays parked.
+
+### A15. copyLast bodies refused by the R3 research pass: shared check helper, one shared body, no ROT
+
+- **What happened.** The R3 research pass (2026-11-15, `.handoff/research/r3/`, build e3c1d42 / ff6ee762) built
+  `copyLast(dst, dstOffset, n)` four ways as module variants of the frozen file. All four pass a 16,236-case sweep
+  against the last k of the frozen `copyTo`, the parity matrix (copyLast(count) === copyTo incl. every error case),
+  the n list and the B/op + MEGA lanes (0 B per call). Refused: (1) SHARED (copyCheck takes n; copyTo passes count)
+  and (2) DELEG (one copyRange body behind two wrappers): each makes `copyTo` ITSELF 1.15-1.18x slower at head 0 and
+  1.52-1.62x at head 768 on a full Float32 1024 ring (its ROT path), and DELEG makes copyTo and copyLast share one
+  4-class store budget per family; (3) NOROT (the scalar loop for a whole-window copy): 6.79-6.80x / 2.06-2.10x of
+  copyTo at head 0 / 768. Kept: OWN (copyLast + its own `lastCheck`, copyTo byte-identical). OWN's copyLast(count)
+  is itself 1.15-1.17x / 1.53-1.76x of copyTo on that path, which FIRED the INTAKE kill rule (> 1.10); the maintainer
+  WAIVED it (Q-R3-PARGAP A): the parity gate is an output / throw gate, and ROT is still in use (NOROT above).
+  Mechanism UNKNOWN: two frozen-copyTo twins and OWN's own copyTo (identical source) read 0.99-1.02 of the frozen
+  copyTo, every body whose inlined check helper carries copyLast's n check and min is slow (no ablation separates the
+  two), feeding rotCopy from fields (OWN2) or re-reading `this.count` (SH2) changes nothing, no deopt
+  (`--trace-deopt`), everything inlined (budget 483 -> 792 / 920); the gap grows with the rotate work (~8 ns with
+  `set` only, ~90-135 ns with `copyWithin` + a 256-sample loop).
+- **Root cause.** Unknown (above). The refusals rest on the measured copyTo regression, not on a mechanism.
+- **Evidence.** `.handoff/research/r3/PROGRESS.md` rungs 0, 1, 2, 2b, 2c; `runs/rung0-check-v2.json` (untimed, host QUIET,
+  load1 1.52 -> 1.46), `runs/rung1.md`, `rung2.md`, `rung2b.md`, `rung2c.md` (each `quiet-lock run` non-strict exit 2,
+  host PRELIMINARY: another node process at 13-126% CPU, load1 1.79 -> 4.41 at worst; 2026-11-14T23:16Z-23:26Z,
+  Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY; the strict
+  hold was not run). Variants OWN 2f47eec8, SHARED 3aa1b723, DELEG 9810c2d8, NOROT 49866e6c, OWN2 b2473353, SH2
+  99390108; `.handoff/PROPOSAL-r3.md` sections 3-4 (reviewer APPROVED r3).
+- **Law.** 1, 5, 7, 13.
+- **Gate.** None yet (refusal + research). The R3 build unit gates OWN: copyTo / copyToFast / copyCheck / rotCopy
+  byte-identical to HEAD, the strict A/B on the real method. Reopen (1) / (2) only with a strict A/B showing copyTo
+  at <= 1.05x on every T5 row; (3) never while ROT exists; the waived gap reopens as a FILLER mechanism hunt (first
+  ablation: OWN with the n check outside lastCheck), adopting a fix only on a strict A/B.
+- **RULING.** Q-R3-BODY = "A OWN"; Q-R3-BOUNDS = "A offset + n" (amends ROADMAP R3's `dstOffset + k` bullet);
+  Q-R3-ZERO = "A Return 0 early"; Q-R3-PARGAP = "A Waive, ship OWN"; Q-R3-ORDER = "A (dst, off, n)"; Q-R3-FAST =
+  "B Add copyLastFast" (new surface: the copyToFast pattern over the newest k, sharing lastCheck; allocates one
+  `subarray` view per ring half, not measured this cycle); Q-R3-STRICT = "A Rule now, strict in build". Maintainer,
+  2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3.md` section 7).
 
 ---
 
@@ -961,3 +996,23 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 4 (a lane must run in the state it claims), 12 (scope every measurement).
 - **Gate.** None (research harness). A probe lane that claims fresh / monomorphic feedback builds its columns from
   unique source text (or separate modules); a lane that wants shared feedback says so.
+
+### D12. Probe harness traps in the R3 research: a per-call closure in a column, reps sized from cold code, a column assumed privileged
+
+- **What happened.** Three traps in `.handoff/research/r3/probe-copylast.mjs` (2026-11-15), each caught before a
+  number was used: (1) the CALLER column was written as a per-call IIFE, which allocated ~58-64 B per call of harness
+  (rung 0 v1, `runs/rung0-check-v1.json`); and v1's BOX must-allocate control read 11.74 B at 20,000 calls per window,
+  under the INTAKE's 12 B, so v2 moved to a named function and >= 100,000 calls per window; (2) `reps` was sized from
+  the first 2,000 (cold) calls, ~1,500 reps = ~40 us timing samples, and a 30,000-call B/op lane read +-3-6 B per call
+  (smoke run, another node at 121% CPU); v3 sizes reps from warmed code and uses >= 100,000 calls per window;
+  (3) when copyLast(count) read 1.16-1.59x of the frozen copyTo (rung 2), the frozen column was suspected of being
+  privileged (shared module, buffer placement); rung 2b's twins (a second frozen ring, the frozen file as a second
+  module) and OWN's identical copyTo read 0.99-1.02 of it: the suspicion was wrong and the gap real (A15).
+- **Root cause.** (1) A closure literal in a hot expression allocates a JSFunction per call; a control's threshold
+  must be met at the window size used. (2) Cold-code timing is 10x+ slower, so derived sample sizes come out short.
+  (3) A ratio against one column cannot tell "this column is fast" from "the others are slow" without a twin of it.
+- **Evidence.** `.handoff/research/r3/PROGRESS.md` rung 0 (harness v1 -> v2), "Timed harness prepared", rung 2b;
+  `runs/rung0-check-v1.json`, `rung0-check-v2.json`, `runs/smoke.*`, `runs/rung2b.md` (Node v26.8.2, hosts as stated there).
+- **Law.** 1 (a control must fire at the size used), 4 (a lane must measure the code it claims, not the harness).
+- **Gate.** None (research harness). A probe column calls named functions only; reps are sized after warm-up; a
+  reference column that decides a kill rule gets a twin (A/A of the reference, not only of the candidate).
