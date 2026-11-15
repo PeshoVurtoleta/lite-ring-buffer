@@ -61,11 +61,12 @@
  * tracker that missed any of them would make "live=0" prove less.
  *
  * alloc B/op on each lane is V8's total_allocated_bytes delta over the window /
- * ops (Node >= 24). One window carries a fixed 0.03-1 MB of tier-up and runtime
- * bytes that do not scale with ops, so the empty-loop BASELINE lane (HOT ops)
- * prints that floor and the GATE line reports the worst gated lane NET of it,
- * the floor rescaled to the lane's own op count (baseline B/op x HOT / n). REPORTED
- * only here; test/alloc.mjs (min over windows) is the B/op gate.
+ * ops (needs the counter: Node v26.8.2; on Node 20 / 22 / 24 the B/op, res= and
+ * alloc= columns print n/a). One window carries a fixed 0.03-1 MB of tier-up
+ * and runtime bytes that do not scale with ops, so the empty-loop BASELINE lane
+ * (HOT ops) prints that floor and the GATE line reports the worst gated lane NET
+ * of it, the floor rescaled to the lane's own op count (baseline B/op x HOT / n).
+ * REPORTED only here; test/alloc.mjs (min over windows) is the B/op gate.
  *
  * Exit: 0 ok, 1 a gate failed, 2 the harness cannot run (no --expose-gc, a
  * devDependency missing, an unusable target).

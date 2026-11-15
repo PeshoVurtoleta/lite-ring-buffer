@@ -1,5 +1,6 @@
 // ASCII gate: any code point > 0x7F except U+00D7 and U+00B5 is a finding.
-// Scans package.json, every files[] entry (dirs recursively) and test/**.
+// Scans package.json, every files[] entry (dirs recursively), test/** and .github/**
+// (the CI workflow; required: a missing .github is exit 2, like any missing path).
 // Usage: node test/ascii.mjs [rootDir]   (default: the package root)
 // Exit 0 clean, 1 findings, 2 self-control broken or unreadable input.
 import fs from 'node:fs';
@@ -51,6 +52,7 @@ if (!Array.isArray(pkg.files)) { console.error('ascii: package.json has no files
 addPath('package.json');
 for (const f of pkg.files) addPath(String(f).replace(/\/$/, ''));
 addPath('test');
+addPath('.github');
 
 let n = 0;
 for (const rel of [...files].sort()) {

@@ -1,0 +1,110 @@
+# ci.yml -- lite-ring-buffer per-push / per-PR gate (Track Q1, 2026-11-16; modeled on LiteFastBit32 ci.yml).
+# DETERMINISTIC tier only: test:core, test:types, npm run verify (pinned legs), alloc (B/op counts), torture
+# (leak + GC counts), ascii. No quiet lock, no timed gate: the bench:* scripts and inline-diff / deopt-diff are
+# STATISTICAL or REPORTED and stay on the local quiet host (hosted CI is not calibrated for them).
+# Matrix: node 18 / 20 / 22 / 24 / 26 x ubuntu-latest + macos-latest, plus one node 26.8.2 leg per OS: 12 legs.
+# - 26.8.2 (the pinned engine, Q-M1-GATE A): npm run verify (npm test 294 + alloc + torture + ascii), test:core,
+#   test:types. macos-latest is arm64, the host of record for the chain-size pin.
+# - 26: test:core, test:types, alloc, torture.
+# - 20 / 22 / 24: test:core, test:types, torture (local probe 2026-11-16, untimed: `node --expose-gc test/torture.mjs`
+#   3 runs each on v20.20.2 / v22.23.5 / v24.22.3, all exit 0; on v18.20.8 it exits 1).
+# - 18 (the shipped engines floor, package.json engines >=18): test:core, test:types.
+# test:core (test/core.mjs) = the 10 base files (206 tests) on every leg, plus the feature tier (qa-r1, qa-r3,
+# qa-m1: 41 tests) iff ArrayBuffer#transfer, ArrayBuffer#resize and SharedArrayBuffer#grow exist, else a named
+# "core: SKIP feature tier ... -- missing: <names>" line (node 18: all three; node 20: transfer). A node >= 22
+# missing any of them FAILS (fail closed). Ruling Q-Q1-FEATURES.
+# Named SKIP steps (each prints its reason on the leg):
+# - npm test / npm run verify off 26.8.2: test/chainsize.test.js fails closed off Node v26.8.2 /
+#   V8 14.6.202.34-node.28 (Q-M1-GATE A); InliningTool / DeoptTool need bash, git and the pinned
+#   @zakkster/lite-utils 1.0.0 (engines >=22). Those legs run test:core instead.
+# - alloc on 18 / 20 / 22 / 24: test/alloc.mjs needs v8.getHeapStatistics().total_allocated_bytes, absent
+#   through Node 24.22.3; the step prints whether this leg's engine has it (printed, not gated).
+# - torture on 18: the devDependency @zakkster/lite-leak declares engines.node >=20.
+# fetch-depth 0: InliningTool / DeoptTool (npm test, 26.8.2 legs) read `git show HEAD:RingBuffer.js`.
+# No lockfile is committed (package-lock.json is gitignored): `npm install`, no npm cache; the resolved
+# devDependency versions are printed after install.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    # 30 (nominal): not yet timed on a hosted runner
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['18', '20', '22', '24', '26']
+        include:
+          - os: ubuntu-latest
+            node: '26.8.2'
+          - os: macos-latest
+            node: '26.8.2'
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: provenance
+        run: |
+          node --version
+          npm --version
+          git --version
+          uname -a
+          echo "commit: $(git rev-parse HEAD)"
+          echo "shallow: $(git rev-parse --is-shallow-repository)"
+          echo "CI=${CI:-unset}"
+          echo "cpus: $(node -p 'require("os").cpus().length')  load: $(node -p 'require("os").loadavg().map(x => x.toFixed(2)).join(" ")')"
+          node -p '"v8 " + process.versions.v8 + "  arch " + process.arch'
+          node -p '"features: transfer=" + (typeof ArrayBuffer.prototype.transfer === "function") + " resize=" + (typeof ArrayBuffer.prototype.resize === "function") + " grow=" + (typeof SharedArrayBuffer === "function" && typeof SharedArrayBuffer.prototype.grow === "function") + " total_allocated_bytes=" + ("total_allocated_bytes" in require("v8").getHeapStatistics())'
+      # no committed lockfile: plain install (an engines mismatch only warns, e.g. lite-leak on node 18)
+      - name: install
+        run: npm install --no-audit --no-fund
+      - name: resolved devDependencies
+        run: npm ls --depth=0 || true
+      - name: npm run verify (pinned engine)
+        if: matrix.node == '26.8.2'
+        run: npm run verify
+      - name: test:core
+        run: npm run test:core
+      - name: test:types
+        run: npm run test:types
+      - name: alloc
+        if: matrix.node == '26'
+        run: npm run alloc
+      - name: torture
+        if: matrix.node == '20' || matrix.node == '22' || matrix.node == '24' || matrix.node == '26'
+        run: npm run torture
+      - name: torture SKIPPED (node 18)
+        if: matrix.node == '18'
+        run: echo "SKIP torture on node $(node --version) -- @zakkster/lite-leak (devDependency) declares engines.node >=20; the library keeps engines >=18; test:core + test:types ran above."
+      - name: alloc SKIPPED (node 18 / 20 / 22 / 24)
+        if: matrix.node == '18' || matrix.node == '20' || matrix.node == '22' || matrix.node == '24'
+        run: |
+          echo "SKIP alloc on node $(node --version) -- needs v8.getHeapStatistics().total_allocated_bytes, absent through Node 24.22.3; the B/op gate runs on the node 26 legs."
+          echo "total_allocated_bytes present on this engine: $(node -p '"total_allocated_bytes" in require("v8").getHeapStatistics()') (printed, not gated)"
+      - name: npm test + npm run verify SKIPPED (off the pinned engine)
+        if: matrix.node != '26.8.2'
+        run: echo "SKIP npm test, npm run verify on node $(node --version) -- test/chainsize.test.js fails closed off Node v26.8.2 / V8 14.6.202.34-node.28 (Q-M1-GATE A); InliningTool / DeoptTool need bash, git and the pinned @zakkster/lite-utils 1.0.0; the 26.8.2 legs run the full verify; this leg ran test:core."

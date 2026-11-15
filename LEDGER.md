@@ -53,17 +53,17 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/archive/1.2.1/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, C15, C17, C18, D7, B10)*
+   C8, C10, C11, C15, C17, C18, D7, D18, B10)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18, D18)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
    lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
-   derived from another measurement is not a measurement. *(A11, B4, B12, C9, D4, D16, D17)*
+   derived from another measurement is not a measurement. *(A11, B4, B12, C9, D4, D16, D17, D18)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim is a claim about every caller path (allocation, and any list that reads as exhaustive).** "Zero allocation" holds only
@@ -1065,7 +1065,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 ### D1. `heapUsed` deltas miss transient boxes
 
 - **What happened.** See C8: 19 MB of real allocation read as 0.96 MB. Use `total_allocated_bytes`
-  (Node >= 24): B/op over 1M calls, minimum over windows 1..W-1, empty-loop baseline subtracted;
+  (present on Node v26.8.2, absent on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3, see D18): B/op over 1M calls, minimum over windows 1..W-1, empty-loop baseline subtracted;
   noise under 0.3 B/op.
 - **Root cause.** Scavenges absorb short-lived allocation before the delta is read.
 - **Evidence.** e3e1df1; `test/alloc.mjs` header; memory note `alloc-gate-total-allocated-bytes`.
@@ -1364,3 +1364,24 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `ab-foreach.mjs`, a research harness under `.handoff/archive/1.5.3/research/m1-twospan/`, not in `npm test`). Reopen only with a
   mechanism found for the modes and shown by a clean condition (a run where the mode flips with the condition and
   with nothing else).
+
+### D18. count.mjs's node:test run() event model is absent on Node 18 / 20, and "Node >= 24 has total_allocated_bytes" was false (Track Q1)
+
+- **What happened.** Two portability claims failed when the Q1 CI lane was probed on other engines (local runs 2026-11-16,
+  untimed, arm64, npm `node@N` binaries). (1) `test/count.mjs` counts through `node:test` `run()` events
+  (`details.type`, `test:summary`); on Node 18 / 20 that model is missing and a run reads pass 0, so `test:core`
+  (`test/core.mjs`) counts the TAP summary of each file's own child instead (v18.20.8 206 / 206, v20.20.2 206 / 206,
+  v22.23.5 / v24.22.3 / v26.8.2 247 / 247). (2) README.md and llms.txt said the other dev scripts need Node >= 24 for
+  V8's `total_allocated_bytes`; the counter was seen on v26.8.2 only (absent on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3), so
+  `npm run alloc` needs v26. Corrected in the docs (CHANGELOG [Unreleased]); D1 carries the same correction.
+- **Root cause.** The suite's gate was only ever run on the pinned engine (Node v26.8.2); a claim about other engines
+  was written from the version a feature was expected in, not from a run (law 5).
+- **Evidence.** HEAD 834dab9 + the Q1 working tree; logs `.handoff/q1/evidence/` (core-v<version>.log per engine, 0c-n{20,22,24}-{1,2,3}.log, fix-torture-n18.log, ev-types-n18.log / ev-types-26.log, teeth.log, engine-features.log, review mutants review/*.out) of the 2026-11-16 local runs (test:core exit 0 on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3 /
+  v26.8.2; test:types exit 0 on v18.20.8 and v26.8.2; torture 3 runs each exit 0 on v20.20.2 / v22.23.5 / v24.22.3,
+  exit 1 on v18.20.8, CONTROL lane profiler blind). The CI workflow itself has NOT run on GitHub: unverified there.
+- **Law.** 1, 2, 5.
+- **Gate.** `test/core.mjs` (header; teeth by mutants in temp copies, all non-zero exits: deleted file, +1 test,
+  `it.skip`, top-level throw, unclassified FILES entry, unparseable EXPECTED (exit 2), feature guard on Node 22 with
+  `transfer` deleted, timeout, maxBuffer, spawn ENOENT); `.github/workflows/ci.yml` named SKIP steps (alloc on
+  18 / 20 / 22 / 24 prints whether the engine has the counter, printed not gated). Reopens if the CI matrix changes an
+  engine or a claim about another engine is made without a run on it.

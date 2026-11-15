@@ -24,6 +24,8 @@
   ],
   "scripts": {
     "test": "node test/count.mjs",
+    "test:core": "node test/core.mjs",
+    "test:types": "tsc -p test/types/tsconfig.json",
     "alloc": "node --expose-gc test/alloc.mjs",
     "torture": "node --expose-gc test/torture.mjs",
     "ascii": "node test/ascii.mjs",
@@ -70,6 +72,7 @@
     "@zakkster/lite-leak": "^1.10.0",
     "@zakkster/lite-o1": "^1.11.3",
     "@zakkster/lite-signal": "^1.5.2",
-    "@zakkster/lite-utils": "1.0.0"
+    "@zakkster/lite-utils": "1.0.0",
+    "typescript": "^7.0.2"
   }
 }

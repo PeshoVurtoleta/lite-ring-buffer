@@ -231,17 +231,35 @@ Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12)
 The M1 research burst closed 2026-11-15 (M1 dropped, see Parked).
 STATUS 2026-11-15: done, committed acce045 (unit B1: bench + strict run + docs), released in 1.5.3. `npm run bench:compare` (dev-only, REPORTED); one strict QUIET run, every row VALID, evidence `.handoff/archive/1.5.3/B1/strict-1/compare.md`. The README "3-5x" claim is replaced by the measured figures and the README has the comparison table (LEDGER B12 / C18).
 
-## Track Q -- queued 2026-11-15 from an external review (maintainer: "Yes, add"; order and Q-ids still to rule)
+## Track Q -- queued 2026-11-15 from an external review (maintainer: "Yes, add"; Q-ids RULED 2026-11-16, see Q1)
 
 ### Q1 -- CI (tooling; no runtime change)
+RULINGS (maintainer, 2026-11-16, AskUserQuestion, one sitting; option text as asked):
+- Q-Q1-LAYOUT = "Suite pattern": copy the LiteFastBit32 / LiteUtils ci.yml; DETERMINISTIC gates only; Node 18-26
+  x ubuntu + macos, plus a 26.8.2 leg per OS running the full verify (chain-size gate included); other legs run a
+  new `test:core` subset (npm test fails closed off 26.8.2, Q-M1-GATE A unchanged).
+- Q-Q1-ENGINES = "Keep >=18, prove it": the core lane runs on Node 18 / 20 / 22 / 24 / 26; lanes needing newer
+  Node (alloc 24+, lite-leak torture 20+) are named SKIPs, as in LiteFastBit32.
+- Q-Q1-TYPES = "Add test:types": typescript devDependency only, a typed usage file under `tsc --noEmit`.
+- Q-Q2-MNEMONIST = "Yes, devDependency": pinned by version + sha256 like lite-o1. Order: Q1 first, then Q2
+  (needs a quiet strict window).
+- Q-Q1-FEATURES (2026-11-16, Q1 burst) = "Tiered, named SKIP": test:core = a base file set that runs on Node 18+
+  with a fixed count, plus a feature tier (ArrayBuffer#transfer / resizable ArrayBuffer: qa-r1, qa-r3, qa-m1) that
+  runs and is count-gated when the engine has the feature, else a named SKIP with a printed reason; no test file
+  source changes.
+- Q-Q1-LOCALNODE (2026-11-16, Q1 burst) = "Yes, fetch 18/20/22/24": local lane evidence on npm `node@N` binaries.
 - A pinned job: `npm run verify` on Node v26.8.2, macos-arm64 (the host of record), so the fail-closed chain-size
   gate keeps its meaning (Q-M1-GATE A unchanged).
 - A portable core lane on the LTS matrix: the behavioural test files only (no engine pin, no bash / git tools).
-- `engines: >=18` is a claim nothing tests today (`npm test` needs exactly v26.8.2, the dev scripts need >= 24, and
-  Node 18 is end-of-life): either the core lane covers 18 / 20 / 22, or `engines` is raised.
+- (queued text, superseded by the rulings above) `engines: >=18` was a claim nothing tested (`npm test` needs exactly
+  v26.8.2; the "dev scripts need >= 24" line was false: `total_allocated_bytes` is absent through v24.22.3, LEDGER D18).
 - Design reference: the lite-fastbit32 nightly-CI program (see Track R R1, `PLAN-nightly-ci.md`). STATISTICAL claims
-  stay out of CI gates. Maintainer rulings needed: workflow layout (likely a suite pattern), the `engines` floor,
-  and whether a types check (`tsc --noEmit` on `RingBuffer.d.ts`, devDependency only) joins the core lane.
+  stay out of CI gates.
+STATUS 2026-11-16: done in the working tree (Q1 burst), not committed. `.github/workflows/ci.yml` (12 legs),
+`npm run test:core` (`test/core.mjs`: 206 base tests on Node 18+, 41 feature-tier tests where transfer / resize / grow
+exist), `npm run test:types` (typescript ^7.0.2 devDependency), ascii scans `.github/`. Local evidence on v18.20.8 /
+v20.20.2 / v22.23.5 / v24.22.3 / v26.8.2 in `.handoff/q1/evidence/`. The workflow is UNVERIFIED on GitHub until the
+maintainer pushes.
 
 ### Q2 -- B2: extend the comparison bench (REPORTED only; one strict run)
 - A "checked" hand-rolled Float32Array column with the same argument checks as RingBuffer, so B1's `getOrDefault`

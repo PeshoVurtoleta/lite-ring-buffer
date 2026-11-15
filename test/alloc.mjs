@@ -8,8 +8,9 @@
  * Measures bytes allocated per call (B/op) for every method the docs call
  * allocation-free, plus the documented allocating paths, and gates on them.
  *
- * Method: V8's `total_allocated_bytes` counter (Node >= 24) read around a window
- * of N calls in a hot loop, minus an empty-loop baseline measured the same way.
+ * Method: V8's `total_allocated_bytes` counter (present on Node v26.8.2, absent
+ * through v24.22.3) read around a window of N calls in a hot loop, minus an
+ * empty-loop baseline measured the same way.
  * It counts every allocation, including boxes that die young -- a heapUsed delta
  * cannot see those once a scavenge runs. Steady state is the MINIMUM over windows
  * 1..W-1: window 0 runs pre-TurboFan code, which does not inline and boxes. The
@@ -127,7 +128,7 @@ if (typeof globalThis.gc !== 'function') {
     process.exit(2);
 }
 if (!('total_allocated_bytes' in v8.getHeapStatistics())) {
-    process.stderr.write('alloc: v8.getHeapStatistics().total_allocated_bytes missing (Node >= 24 needed)\n');
+    process.stderr.write('alloc: v8.getHeapStatistics().total_allocated_bytes missing (present on Node v26.8.2, absent through v24.22.3)\n');
     process.exit(2);
 }
 

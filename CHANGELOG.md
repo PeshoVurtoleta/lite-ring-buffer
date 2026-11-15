@@ -10,6 +10,20 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Added
+
+- `npm run test:core` (`test/core.mjs`, not in `verify`): the portable core lane. The 10 base test files (206 tests) run on Node 18 / 20 / 22 / 24 / 26, each in its own `--test-reporter=tap` child, count-gated against `test/count.mjs`; the feature tier (`qa-r1`, `qa-r3`, `qa-m1`: 41 tests) runs where `ArrayBuffer#transfer`, `#resize` and `SharedArrayBuffer#grow` exist, else a named SKIP (a Node >= 22 missing one fails).
+- `npm run test:types` (`tsc -p test/types/tsconfig.json`, strict; new devDependency `typescript` ^7.0.2): `test/types/ringbuffer.test-d.ts` exercises every export and member of `RingBuffer.d.ts` and pins 6 misuse errors.
+- `.github/workflows/ci.yml`: 12 legs (Node 18 / 20 / 22 / 24 / 26 on ubuntu-latest and macos-latest, plus Node 26.8.2 per OS); DETERMINISTIC gates only; every lane a leg cannot run is a named SKIP step. Not yet run on GitHub.
+
+### Changed
+
+- `npm run ascii` also scans `.github/` (required: a missing path exits 2).
+
+### Docs
+
+- README and `llms.txt`: the claim that the other dev scripts need Node >= 24 was false. `npm run alloc` needs V8's `total_allocated_bytes`, present on Node v26.8.2 and absent on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3 (local runs 2026-11-16); `npm run torture` needs Node >= 20. The Testing section documents `test:core`, `test:types` and CI.
+
 ## [1.5.5] - 2026-11-15
 
 ### Docs
