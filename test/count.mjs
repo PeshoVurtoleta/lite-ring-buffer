@@ -11,13 +11,13 @@
 //
 // A test file added or removed here updates FILES and EXPECTED together.
 // EXPECTED is pinned to the "tests N" line of a plain
-// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js test/mutant-kills.test.js test/qa-r1.test.js test/DeoptTool.test.js test/pushbatch.test.js test/qa-r2.test.js`
-// (60 + 35 + 30 + 9 + 10 + 8 + 15 + 7 + 20 + 25 + 3 + 7 = 229), not to this file's tally.
+// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js test/mutant-kills.test.js test/qa-r1.test.js test/DeoptTool.test.js test/pushbatch.test.js test/qa-r2.test.js test/copylast.test.js test/copylast-parity.test.js`
+// (60 + 35 + 30 + 9 + 10 + 10 + 15 + 7 + 20 + 25 + 3 + 7 + 19 + 9 = 259), not to this file's tally.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js', 'test/mutant-kills.test.js', 'test/qa-r1.test.js', 'test/DeoptTool.test.js', 'test/pushbatch.test.js', 'test/qa-r2.test.js'];
-const EXPECTED = 229;
+const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js', 'test/mutant-kills.test.js', 'test/qa-r1.test.js', 'test/DeoptTool.test.js', 'test/pushbatch.test.js', 'test/qa-r2.test.js', 'test/copylast.test.js', 'test/copylast-parity.test.js'];
+const EXPECTED = 259;
 
 process.exitCode = 1;
 

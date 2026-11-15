@@ -10,9 +10,21 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Added
+
+- `copyLast(dst, dstOffset, n)`: copies the newest `min(n, count)` samples oldest-first into a Float32Array / Float64Array from `dstOffset` (`undefined` means 0) and returns that count. `n` is required; the bounds check is on `dstOffset + n` (not on the copied count), so an `n` larger than `dst` can hold throws even on an empty ring; a count of 0 returns 0 before the alias and storage checks. `copyLast(dst, off, rb.count)` writes, returns and throws exactly as `copyTo(dst, off)` (the messages name `copyLast`). Allocates 0 B under `copyTo`'s per-store-site 4-class rule, with one exception: the whole-window Float32 path runs `copyTo`'s `rotCopy`, whose store site is shared with `copyTo`, so the Float32 `dst` classes either method passes through `rotCopy` count against one budget. For a whole-window copy prefer `copyTo`. Against copying the whole window and then its last n, `copyLast` is 2.2-2.3x faster at n 120 and 1.5x at n 512 on a full 1024 ring (REPORTED, strict A/B 2026-11-15, Node v26.8.2 arm64).
+- `copyLastFast(dst, dstOffset, n)`: the same contract and errors with at most two `set` calls over `subarray` views; allocates one view per ring half it spans (REPORTED: 104.0 B contiguous / 208.0 B straddling, `npm run alloc`, 2026-11-15, Node v26.8.2 arm64) and never boxes a sample.
+
+### Tests
+
+- `npm test` count 229 -> 259: new `test/copylast.test.js` (19) and `test/copylast-parity.test.js` (9), and `test/mutant-kills.test.js` 8 -> 10 (`EXPECTED` and `FILES` in `test/count.mjs`). The R3 mutant set (24 mutants) is killed in full.
+- `npm run alloc` gains the `copyLast` lanes (n 120 / 1024, contiguous and straddling, Float32 and Float64 `dst`; the whole window at head 768), the REPORTED `copyLastFast` lanes and the `MEGA copyLast` lanes with an Int16 must-allocate control. `npm run torture` gains the gated lanes `copyLast 120 straddling F32+F64` (250,000 ops) and `copyLast(count) ROT full 1024` (125,000 ops), and its buffer-retention tracker covers `copyLast`.
+- New dev-only `npm run bench:copylast` (`test/bench/copylast-ab.mjs` + `test/bench/copylast-probe.mjs`; STATISTICAL: strict quiet lock, not in `verify`, not shipped): interleaved A/B of `copyLast` against a caller's `copyTo` + loop and of `copyLast(count)` against `copyTo`.
+
 ### Docs
 
 - README / `.d.ts` / `llms.txt`: `pushBatch` doc truth from the 1.4.0 post-release audit. After `destroy()` only valid arguments are a silent no-op (invalid ones still throw); a frozen ring throws from the `head` store only for `count` > 0 (`count` 0 returns 0); the batch-ingest summary no longer says "exactly" (NaN payload bits unspecified: the whole-Float32 `set` path keeps a signalling-NaN payload that `push` quiets (audit probe, Node v26.8.2 arm64)). No code change.
+- `RingBuffer.js` JSDoc: the `pushBatch` doc fixes of the 1.4.0 post-release audit (AUDIT N1 / N2, R2-9) now live in the JSDoc as well as README / `.d.ts` / `llms.txt`.
 
 ## [1.4.0] - 2026-11-14
 

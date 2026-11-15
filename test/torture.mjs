@@ -7,13 +7,15 @@
  * Two jobs, kept separate (torture-harness skill):
  *   - @zakkster/lite-leak        -- retention. Phase 1 churns 4096 RingBuffers
  *     (push past capacity, pushBatch from a Float32Array and a Float64Array,
- *     getOrDefault, forEach, copyTo, copyToFast, reset, destroy on odd cycles);
+ *     getOrDefault, forEach, copyTo, copyToFast, copyLast, copyLastFast,
+ *     reset, destroy on odd cycles);
  *     tracker.size() must drain to 0. A second tracker follows the
  *     `data` arrays of 256 instances that stay ALIVE: after destroy() every one
  *     must be reclaimed (destroy really drops the backing store). A third follows
- *     their buffers: even rings fill the alias-check cache by copyTo, odd rings
- *     ONLY by pushBatch, so a buffer reference pushBatch keeps past destroy()
- *     (e.g. a cache field destroy() does not clear) leaves 128 alive.
+ *     their buffers: rings with i % 4 === 0 fill the alias-check cache by copyTo,
+ *     i % 4 === 2 ONLY by copyLast, odd rings ONLY by pushBatch, so a buffer
+ *     reference pushBatch keeps past destroy() (e.g. a cache field destroy()
+ *     does not clear) leaves 128 alive, one copyLast keeps leaves 64.
  *   - @zakkster/lite-gc-profiler -- budget. Phase 2 runs each hot lane in its
  *     own function on an instance built outside the loop, HOT ops per lane, and
  *     gates every gated lane at major 0, minor 0, maxPauseMs 2.
@@ -25,7 +27,13 @@
  * capacity-1024 ring is GATED (COPY1024_HOT ops; per op a whole Float32Array
  * of 128 (the intrinsic `set` path), a +3 Float32 slice of 128, a Float64Array
  * of 128 and a Float32Array of 1152 (count > capacity); every call advances
- * head by 128 mod 1024, so the `set` call always fits before the wrap). Two lanes are
+ * head by 128 mod 1024, so the `set` call always fits before the wrap).
+ * copyLast is GATED in two lanes: 'copyLast 120 straddling F32+F64' (CL120_HOT
+ * ops on a full capacity-1024 ring at head 7, no push, so the newest 120 always
+ * wrap; per op one copy into a Float32Array and one into a Float64Array: the
+ * masked loops) and 'copyLast(count) ROT full 1024' (COPY1024_HOT ops, one push
+ * per op as the copyTo 1024 lane, copyLast(dst, 0, count): the rotCopy path at
+ * every start). Two lanes are
  * REPORTED, never gated: copyToFast of 1024 wrapped samples (set + subarray,
  * 2 views per call) and get(i) (boxes its result).
  * get(i) stays REPORTED, not a second CONTROL: its 16 B/op reads only a few
@@ -33,10 +41,11 @@
  * flake in a deterministic gate. Its 16 B teeth are gated deterministically by
  * test/alloc.mjs `CONTROL get(i), one 16 B box`.
  *
- * A build without copyToFast or pushBatch: the default target fails closed
- * (exit 2); an explicit build path (revert / must-fail run on an older build)
- * skips those calls in churn() / fillHeld() and prints their lanes as 'n/a'
- * (a gated 'n/a' lane fails the run).
+ * A build without copyToFast, pushBatch or copyLast / copyLastFast: the default
+ * target fails closed (exit 2); an explicit build path (revert / must-fail run
+ * on an older build) skips those calls in churn() / fillHeld() (fillHeld fills
+ * those rings' cache by copyTo instead) and prints their lanes as 'n/a' (a
+ * gated 'n/a' lane fails the run).
  *
  * res= on the GATE line is the minor-GC gate's resolution: the CONTROL lane's
  * alloc B/op divided by its minor count (= control bytes per minor / HOT ops).
@@ -45,8 +54,8 @@
  * control read minor 0 or the alloc counter is missing. It drifts upward when
  * V8 grows new space. Printed, never gated (test/alloc.mjs gates B/op).
  * res assumes HOT ops; a lane of n ops resolves res x HOT / n, so the copyTo
- * 1024 lane (COPY1024_HOT = HOT/16) proves only < 16 x res B/op;
- * test/alloc.mjs gates it at < 1 B/op.
+ * 1024 lane (COPY1024_HOT = HOT/16) proves only < 16 x res B/op, the copyLast
+ * 120 lane (CL120_HOT = HOT/8) < 8 x res; test/alloc.mjs gates both at < 1 B/op.
  *
  * Retention: churn() must leave exactly CYCLES instances tracked mid-run; a
  * tracker that missed any of them would make "live=0" prove less.
@@ -103,6 +112,12 @@ if (!HAS_PB && !target) {
     process.stderr.write('torture: RingBuffer.js has no pushBatch (fail closed; pass an explicit build path for a revert run)\n');
     process.exit(2);
 }
+const HAS_CL = typeof RingBuffer.prototype.copyLast === 'function' &&
+    typeof RingBuffer.prototype.copyLastFast === 'function';
+if (!HAS_CL && !target) {
+    process.stderr.write('torture: RingBuffer.js has no copyLast / copyLastFast (fail closed; pass an explicit build path for a revert run)\n');
+    process.exit(2);
+}
 
 const CYCLES = 4096;
 const HELD = 256;
@@ -110,6 +125,7 @@ const HOT = 2_000_000;
 const CHUNK = 1000;         // ops per lane call: a hot path is called often, briefly
 const WARM = 300_000;       // warmup ops per lane, outside the window
 const COPY1024_HOT = HOT >> 4; // the 1024 lanes copy 1024 samples per op
+const CL120_HOT = HOT >> 3;    // the copyLast 120 lane copies 2 x 120 samples per op
 
 const HAS_ALLOC_COUNTER = 'total_allocated_bytes' in v8.getHeapStatistics();
 const allocated = () => (HAS_ALLOC_COUNTER ? v8.getHeapStatistics().total_allocated_bytes : NaN);
@@ -124,6 +140,8 @@ const NO_OVERWRITE = { overwrite: false };
 const SCRATCH_1024 = new Float32Array(1024);
 const DST32_F32 = new Float32Array(32);
 const DST32_F64 = new Float64Array(32);
+const DST120_F32 = new Float32Array(120);
+const DST120_F64 = new Float64Array(120);
 // pushBatch sources, x + 0.5 (not Smi-representable): 128 whole, 128 + 3 (slice), 128 Float64, 1152 (> 1024).
 function srcOf(K, len) {
     const s = new K(len);
@@ -174,6 +192,10 @@ function churn() {
             SINK[0] += rb.pushBatch(PB_F32);
             SINK[0] += rb.pushBatch(PB_F64, 0, 100);
         }
+        if (HAS_CL) {
+            SINK[0] += rb.copyLast(DST120_F32, 0, 120);
+            SINK[0] += rb.copyLastFast(DST120_F64, 0, 120);
+        }
         rb.reset();
         if (i & 1) rb.destroy();
         // The cleanup and the tag capture nothing (held-value contract).
@@ -188,8 +210,10 @@ function fillHeld(held) {
         for (let k = 0; k < 64; k++) rb.push(VALS[k & 15]);
         // One copy before destroy(): the buffer cache starts empty, so without a
         // copy there is nothing for destroy() to drop. Odd rings fill it ONLY by
-        // pushBatch (the explicit-build fallback without pushBatch uses copyTo).
+        // pushBatch, i % 4 === 2 ONLY by copyLast (the explicit-build fallback
+        // without the method uses copyTo).
         if ((i & 1) === 1 && HAS_PB) SINK[0] += rb.pushBatch(PB_F32_SLICE, 3, 128);
+        else if ((i & 3) === 2 && HAS_CL) SINK[0] += rb.copyLast(DST120_F32, 0, 120);
         else SINK[0] += rb.copyTo(SCRATCH_1024, 0);
         dataTracker.track(rb.data, noop, 'data');
         bufTracker.track(rb.data.buffer, noop, 'buf');
@@ -326,6 +350,23 @@ function lanePushBatch(rb, n) {
     }
 }
 
+// A full capacity-1024 ring at head 7, no push: the newest 120 always straddle the wrap (start 911).
+function laneCopyLast120(rb, n) {
+    for (let i = 0; i < n; i++) {
+        SINK[0] += rb.copyLast(DST120_F32, 0, 120);
+        SINK[0] += rb.copyLast(DST120_F64, 0, 120);
+    }
+    SINK[1] += DST120_F32[n & 63] + DST120_F64[n & 63];
+}
+
+// A full capacity-1024 ring pushed once per op, the whole window copied: start walks 0..1023 through rotCopy.
+function laneCopyLastRot(rb, n) {
+    for (let i = 0; i < n; i++) {
+        rb.push(VALS[i & 15]);
+        SINK[0] += rb.copyLast(SCRATCH_1024, 0, rb.count);
+    }
+}
+
 function laneGetBox(rb, n) {
     for (let i = 0; i < n; i++) KEEP[0] = rb.get(i & 1023);
 }
@@ -341,6 +382,8 @@ const rbCtl = full(32);
 const rbBig = full(1024);
 const rbFast = full(1024);
 const rbBox = full(1024);
+const rbCL = full(1024);
+const rbCLRot = full(1024);
 const rbPB = new RingBuffer(1024);
 for (let k = 0; k < 1024; k++) rbPB.push(VALS[k & 15]);
 
@@ -358,6 +401,8 @@ const LANES = [
     ['CONTROL subarray view per op', 'control', HOT, (n) => laneControl(rbCtl, n)],
     ['copyTo 1024 F32, start walks 0..1023', 'gated', COPY1024_HOT, (n) => laneCopy1024(rbBig, n)],
     ['pushBatch 1024 set+slice+F64+over-cap', 'gated', COPY1024_HOT, HAS_PB ? (n) => lanePushBatch(rbPB, n) : null],
+    ['copyLast 120 straddling F32+F64', 'gated', CL120_HOT, HAS_CL ? (n) => laneCopyLast120(rbCL, n) : null],
+    ['copyLast(count) ROT full 1024', 'gated', COPY1024_HOT, HAS_CL ? (n) => laneCopyLastRot(rbCLRot, n) : null],
     ['REPORTED copyToFast 1024 wrapped', 'reported', COPY1024_HOT, HAS_FAST ? (n) => laneCopyFast1024(rbFast, n) : null],
     ['REPORTED get(i)', 'reported', HOT, (n) => laneGetBox(rbBox, n)],
 ];

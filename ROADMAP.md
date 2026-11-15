@@ -177,12 +177,15 @@ before the alias / storage checks; copyLast has its own check helper and store s
 (Q-R3-FAST); copyLast(count) is slower than copyTo on a full Float32 ring (PRELIMINARY, mechanism unknown), the
 parity gate is output / throw only (Q-R3-PARGAP); the strict A/B runs in the build unit (Q-R3-STRICT).
 
+BUILT 2026-11-15 (working tree on 4b471da / 9765c21e; review APPROVED; ships in 1.5.0): `copyLast` + `copyLastFast`, 259 tests;
+the strict A/B (`npm run bench:copylast`) exit 0 (see LEDGER A15).
+
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.
 - Copies `min(n, count)` samples, oldest-first, ending at the newest; returns the number copied.
 - `copyLast(dst, off, count)` must equal `copyTo(dst, off)` exactly. That is the parity gate.
 - Fail closed, same rules as `copyTo`: `dst` must be a TypedArray (intrinsic length getter), else
-  TypeError; `n` and `dstOffset` must be non-negative integers, and `!(dstOffset + k <= length)` throws;
+  TypeError; `n` and `dstOffset` must be non-negative integers, and `!(dstOffset + k <= length)` throws (AMENDED to `dstOffset + n` by Q-R3-BOUNDS);
   nothing is written on any throw.
 - Allocation: the R1 strategy, so it ships AFTER R1. Alloc lanes at n = 120 / 1024, contiguous and wrapped,
   plus the case where the tail straddles the wrap.

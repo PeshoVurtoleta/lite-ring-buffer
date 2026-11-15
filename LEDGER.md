@@ -352,6 +352,18 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   byte-identical to HEAD, the strict A/B on the real method. Reopen (1) / (2) only with a strict A/B showing copyTo
   at <= 1.05x on every T5 row; (3) never while ROT exists; the waived gap reopens as a FILLER mechanism hunt (first
   ablation: OWN with the n check outside lastCheck), adopting a fix only on a strict A/B.
+  Build-unit gates (2026-11-15, working tree on 4b471da / 9765c21e, review APPROVED): OWN gated by the identity / golden
+  byte-identical check of copyTo / copyToFast / copyCheck / rotCopy, 259 tests, the R3 mutant runs (24 mutants, C14),
+  and the `npm run alloc` / `npm run torture` copyLast lanes (`.handoff/R3/gate/b2/verify.log`, run on the round-1 build 6d92ed1f; 9765c21e differs from it
+  by JSDoc and test assertions only; closing verify on 9765c21e: `.handoff/R3/verify-final.log`). Strict A/B
+  (`npm run bench:copylast`): strict A/B `.handoff/R3/ab/strict-1/` (quiet-lock --strict exit 0, QUIET, load1 2.06 ->
+  2.02 vs baseline 2.21, 2026-11-15, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations = 63
+  paired rounds per row, 63 rounds, every timed column 0.00 B/op): caller workaround n 120 2.2-2.3x / n 512 1.5x
+  slower than copyLast; copyLast(count) / copyTo 1.17x (h0) / 1.52x (h768) Float32, 1.00 Float64 -- the waived gap
+  confirmed on the strict host. inlining-budget-diff (REPORTED, `.handoff/R3/inl/main.log`, `ctl.log`): copyTo /
+  copyCheck / rotCopy decisions and sizes unchanged (288 / 257 / 192 B); copyLast 295 / lastCheck 304 / copyLastFast
+  195 B; lastCheck + rotCopy inline into copyLast, but copyLast compiled first is NOT inlined into its caller
+  (cumulative budget 295 + 496 > 920 / 1.2).
 - **RULING.** Q-R3-BODY = "A OWN"; Q-R3-BOUNDS = "A offset + n" (amends ROADMAP R3's `dstOffset + k` bullet);
   Q-R3-ZERO = "A Return 0 early"; Q-R3-PARGAP = "A Waive, ship OWN"; Q-R3-ORDER = "A (dst, off, n)"; Q-R3-FAST =
   "B Add copyLastFast" (new surface: the copyToFast pattern over the newest k, sharing lastCheck; allocates one
@@ -570,6 +582,27 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1, 2.
 - **Gate.** `test/pushbatch.test.js`, describe "replaced storage element type (Q-R2-DATA)" (28 tests). Re-opens if
   `data` may be anything but a Float32Array of `capacity` slots.
+
+### B11. copyLast's own-store-site budget claim was false for the whole-window Float32 path (rotCopy shared with copyTo)
+
+- **What happened.** The R3 proposal (section 2) and the first build's JSDoc said copyLast's three store sites are its
+  own, so copyLast and copyTo each have their own 4-class budget. Caught by the R3 build review, round 1: the
+  whole-window Float32 path (full ring copied whole, capacity > 32) calls `copyTo`'s `rotCopy`, whose scalar loop is
+  one store site shared with `copyTo`. A reviewer probe (unlogged, so no figure is quoted here: law 5) saw that path allocate
+  after `copyTo` ROT with 4 Float32Array subclasses.
+- **Root cause.** The claim was written from the design (copyLast has its own bodies) without checking which store
+  sites its ROT branch reaches (law 7: a doc claim about allocation is a claim about every caller path).
+- **Fix.** Docs carry the exception: `RingBuffer.js` JSDoc, `RingBuffer.d.ts`, README (Bulk copy allocation paragraph,
+  API row, hot-path bullet), `llms.txt`, CHANGELOG: every Float32 `dst` class either method passes through `rotCopy`
+  counts against one 4-class budget. A `rotCopy` clone for copyLast would be a DESIGN change, not proposed; unpark
+  only on a measured MEGA ROT need (a caller whose Float32 `dst` classes exceed the shared budget on a whole-window
+  path).
+- **Evidence.** `.handoff/R3/PLAN-G1.md` addendum A6 (review r1 REJECTED, 3 LITERAL); build 9765c21e (working tree on 4b471da)
+  carries the doc fix; the probe has no run log, so this entry quotes no measurement.
+- **Law.** 7.
+- **Gate.** None for the shared budget itself (documented, not gated: the `npm run alloc` MEGA lanes gate the per-family
+  split of copyLast's own sites). Reopen the design only with a measured MEGA ROT need that clears copyTo's
+  byte-identical gates.
 
 ---
 
@@ -791,6 +824,10 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1.
 - **Gate.** `test/mutant-kills.test.js` (13 mutants, 8 tests; counted by `test/count.mjs`). Re-opens if any
   engine method gains a branch with no test that fails when that branch is mutated.
+- **R3 addition (2026-11-15).** The R3 mutant set (24 mutants, `.handoff/R3/mutants/`, `run.log`: every one fails at
+  least one test, or the alloc / torture lane for the two lane mutants) all die, M7 included: M7 is NOT equivalent
+  under the literal-0 return (on a non-empty ring n = -0 gives k = -0; without `if (k === 0) return 0;` copyLast
+  returns -0, killed by `test/copylast.test.js`). `test/mutant-kills.test.js` is now 10 tests.
 
 ### C15. Unit LU2: the inlining / deopt tooling moves to the pinned @zakkster/lite-utils 1.0.0
 
@@ -823,6 +860,21 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `test/InliningTool.test.js` (version / pinned-exactly row, sha pin, `--self-test` 92 checks, six
   script mutants, MUST-COVER rows) and `test/DeoptTool.test.js`; both in `npm test` (count.mjs `EXPECTED` 174).
   The real-V8 verdicts stay REPORTED, by hand under the quiet lock.
+
+### C16. copyLast's documented check order had no pin (alias vs storage, TypeError vs n for an other-realm DataView)
+
+- **What happened.** In the R3 build review round 1, reviewer mutants X2 (alias check swapped with the storage check)
+  and X10 (the DataView TypeError moved after the `n` check, reachable with an other-realm DataView) survived every
+  test: the documented check order of `copyLast` / `copyLastFast` was pinned only in part.
+- **Root cause.** The check-order test pinned n before bounds before alias / storage, but not alias before storage
+  and not the dst TypeError before the `n` RangeError for a DataView from another realm (law 1).
+- **Fix.** Two cases added to the check-order test in `test/copylast.test.js`.
+- **Evidence.** `.handoff/R3/PLAN-G1.md` addendum A6 (2); build 9765c21e,
+  `test/copylast.test.js` check-order test (the `kills X2` / `kills X10` cases); no run log of X2 / X10 is kept
+  (`.handoff/R3/mutants/run.log` is the 24-mutant R3 set, run on round-1 build 6d92ed1f before these pins).
+- **Law.** 1.
+- **Gate.** `test/copylast.test.js`, the check-order test (message order). Reopens if a check is added to
+  `lastCheck` with no test that fails when its position is mutated.
 
 ---
 

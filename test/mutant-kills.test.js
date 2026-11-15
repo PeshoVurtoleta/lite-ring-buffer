@@ -1,5 +1,12 @@
 // Kills the engine mutants of audit 2026-11-12 (F4), O4 (tryPush default) and M7
-// (copyCheck reads the storage length through the intrinsic getter).
+// (copyCheck reads the storage length through the intrinsic getter), and the R3 copyLast
+// mutants only a copyWithin spy can see (PLAN-G1 TASK 8): the ROT arguments (vs copyTo's)
+// and MB-tag (copyLast reading dst[Symbol.toStringTag] instead of the intrinsic getter).
+// R3 mutant M7 (copyLast without its `k === 0` return) is NOT equivalent (PLAN-G1
+// addendum A5): n = -0 on a non-empty ring returns -0, not addendum A1's literal +0;
+// copylast.test.js A2 ('n = -0 and n = 0 return +0') kills it; no test here targets it.
+// M7F (copyLastFast without it) is
+// NOT equivalent: a BigInt dst's `set` throws even for an empty view (copylast.test.js A3).
 // Expected values come from the documented contract (README / .d.ts / audit
 // ruling Q-AUD-4), never from a run of the build.
 // Build under test: RB_BUILD (absolute or package-relative) else ../RingBuffer.js.
@@ -129,5 +136,44 @@ describe('mutant kills (audit 2026-11-12, F4)', () => {
             assert.throws(() => rb[m](dst, 0), { name: 'RangeError', message: /storage holds 56 slots/ }, m);
             assert.ok(dst.every((v) => v === 9), m + ': dst untouched');
         }
+    });
+});
+
+describe('mutant kills (R3 copyLast, PLAN-G1 TASK 8)', () => {
+    // kills a copyLast ROT that drifts from copyTo's (start / cap / dstOffset arguments)
+    it('copyLast ROT: copyWithin arguments equal copyTo\'s at every head of a full 64 ring', () => {
+        const cap = 64, off = 3;
+        const rb = new RingBuffer(cap);
+        for (let i = 0; i < cap; i++) rb.push(i + 0.5);
+        let hits = 0;
+        for (let h = 0; h < cap; h++) {
+            cwArgs = null;
+            assert.equal(rb.copyTo(new Float32Array(cap + off), off), cap);
+            const want = cwArgs;
+            for (const n of [cap, cap + 5]) { // bounds are on n: dst holds off + n
+                cwArgs = null;
+                assert.equal(rb.copyLast(new Float32Array(off + n), off, n), cap, 'head ' + rb.head + ' n ' + n);
+                assert.deepEqual(cwArgs, want, 'head ' + rb.head + ' n ' + n);
+            }
+            if (want !== null) hits++;
+            rb.push(h + 100.5);
+        }
+        assert.equal(hits, cap - 1); // every head but 0 rotates
+    });
+
+    // kills MB-tag (`dst[Symbol.toStringTag]` in place of TA_TAG in copyLast)
+    it('copyLast picks its store site by the intrinsic tag: a lying toStringTag neither enters nor leaves ROT', () => {
+        class F32AsI8 extends Float32Array { get [Symbol.toStringTag]() { return 'Int8Array'; } }
+        class I8AsF32 extends Int8Array { get [Symbol.toStringTag]() { return 'Float32Array'; } }
+        const cap = 64;
+        const rb = new RingBuffer(cap);
+        for (let i = 0; i < cap + 5; i++) rb.push(i + 0.5); // full, head 5: ROT rotates
+        assert.equal(rb.head, 5);
+        cwArgs = null;
+        assert.equal(rb.copyLast(new F32AsI8(cap), 0, cap), cap);
+        assert.notEqual(cwArgs, null, 'a Float32Array that claims Int8Array still takes ROT');
+        cwArgs = null;
+        assert.equal(rb.copyLast(new I8AsF32(cap), 0, cap), cap);
+        assert.equal(cwArgs, null, 'an Int8Array that claims Float32Array never takes ROT');
     });
 });

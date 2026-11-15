@@ -314,6 +314,71 @@ function loopF64(data, src, h, o, n, mask) {
     for (let i = 0; i < n; i++) data[(h + i) & mask] = src[o + i];
 }
 
+/**
+ * Cold-path error builder for the `n` of `copyLast` / `copyLastFast`; `name`
+ * is the calling method. A number prints as its value, anything else as its
+ * `typeof` (`null` as null), so no user `toString` / `valueOf` runs while
+ * the message is built.
+ */
+function lastNError(name, n) {
+    return new RangeError(
+        'LiteRingBuffer: ' + name + ' needs a non-negative integer n (got ' +
+        (typeof n === 'number' ? '' + n : n === null ? 'null' : typeof n) + ')'
+    );
+}
+
+/**
+ * The shared prologue of `copyLast` and `copyLastFast` (so the two validate
+ * identically by construction): `copyCheck`'s checks with `n` validated and
+ * the bounds taken on `n`. It reuses `copyTo`'s error builders and
+ * `copyCheck`'s cache rules. Checks, in order, all before the first store:
+ * TypeError (not a TypedArray), RangeError (`n` not a non-negative integer:
+ * no coercion, no user `valueOf` / `toString` runs), RangeError (bounds:
+ * `dstOffset` not a non-negative integer, or `dstOffset + n` past `dst`'s
+ * intrinsic length, NaN-safe; the message reports `n`, so an `n` larger than
+ * `dst` can hold throws even on an empty ring), then -- only when
+ * `k = min(n, count)` > 0 -- the alias RangeError, then the storage
+ * RangeError. Returns k; the caller returns 0 when it is 0, before any
+ * store. `data` is the array the caller will copy from (read once by the
+ * caller), so both checks cover exactly the copied array.
+ *
+ * `data`'s buffer comes from `copyCheck`'s identity-keyed cache on the ring
+ * (`_bufOf` / `_buf`, shared with `copyTo` / `copyToFast` / `pushBatch`),
+ * with the same rules: re-read through the intrinsic getter whenever `data`
+ * is not the cached array, the key stored only after that read and only on
+ * an extensible ring. `dst`'s buffer is read through the intrinsic getter on
+ * every call. The alias check is ArrayBuffer identity, with `copyCheck`'s
+ * SharedArrayBuffer limit.
+ */
+function lastCheck(rb, data, dst, dstOffset, n, name) {
+    // isView alone also admits a DataView, which has no indexed slots or `set`.
+    if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError(name, dst);
+    const dlen = TA_LENGTH.call(dst);
+    if (!Number.isInteger(n) || n < 0) throw lastNError(name, n);
+    // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
+    if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + n <= dlen)) {
+        throw boundsError(name, n, dstOffset, dlen);
+    }
+    const c = rb.count;
+    const k = n < c ? n : c;
+    if (k !== 0) {
+        let buf = rb._buf;
+        if (data !== rb._bufOf) {
+            buf = TA_BUFFER.call(data);
+            if (Object.isExtensible(rb)) {
+                rb._buf = buf;
+                rb._bufOf = data;
+            }
+        }
+        // Fail closed: copying a ring into its own storage would overwrite
+        // samples before they are read.
+        if (TA_BUFFER.call(dst) === buf) throw aliasError(name);
+        const len = TA_LENGTH.call(data);
+        if (len !== rb.capacity) throw storageError(name, len, rb.capacity);
+    }
+    return k;
+}
+
 export class RingBuffer {
     /**
      * @param {number} [requestedCapacity=1024] minimum capacity in [1, 2^31];
@@ -393,9 +458,11 @@ export class RingBuffer {
      * Push `count` samples `src[srcOffset] .. src[srcOffset + count - 1]`,
      * oldest first. The ring ends in exactly the state `count` calls of
      * `push` would leave: the same `data` slots, `head` and `count` (each
-     * value rounds through float32; NaN round-trips; values are not
-     * validated). A `count` above `capacity` keeps the last `capacity`
-     * samples. `count === 0` is a no-op, after validation.
+     * value rounds through float32; NaN round-trips (payload bits
+     * unspecified: the `set` path keeps a signalling NaN that `push`
+     * quiets); values are not validated). A `count` above `capacity`
+     * keeps the last `capacity` samples. `count === 0` is a no-op, after
+     * validation.
      *
      * `srcOffset` defaults to 0 and `count` to `src.length - srcOffset`
      * (`src`'s length read through the intrinsic `length` getter; the
@@ -407,9 +474,10 @@ export class RingBuffer {
      * Node 26.8.2 arm64. A whole Float32Array `src` that fits before the wrap
      * is one intrinsic `set`; every other call is a masked scalar loop.
      *
-     * `head` and `count` are stored before the first sample, so a frozen
-     * ring throws a TypeError with `data`, `head` and `count` unchanged
-     * (`push` stores its sample first). A sealed or
+     * `head` and `count` are stored before the first sample, so for
+     * `count` > 0 a frozen ring throws a TypeError with `data`, `head` and
+     * `count` unchanged (`count` 0 returns 0) (`push` stores its sample
+     * first). A sealed or
      * `Object.preventExtensions` ring works; its alias-check cache is not
      * stored (see `copyTo`). The cache (`_bufOf` / `_buf`) is shared with
      * `copyTo` / `copyToFast`.
@@ -423,9 +491,10 @@ export class RingBuffer {
      *         other than Float32Array / Float64Array (a subclass counts as
      *         its element type; BigInt64Array / BigUint64Array included),
      *         even when count is 0; or, when count > 0, if `this.data` is
-     *         not a Float32Array (replaced storage, checked on every call);
-     *         or, when the ring is frozen, from the `head` store. Nothing
-     *         is written.
+     *         not a Float32Array (replaced storage, intrinsic tag, checked
+     *         on every call; the `capacity`-slots RangeError is checked
+     *         first); or, when count > 0 and the ring is frozen
+     *         (`Object.freeze`), from the `head` store. Nothing is written.
      * @throws {RangeError} if `srcOffset` or `count` is not a non-negative
      *         integer (no coercion: a string, BigInt, Symbol, null or object
      *         is rejected, and no user `valueOf` / `toString` runs), or
@@ -646,6 +715,118 @@ export class RingBuffer {
             TA_SET.call(dst, data.subarray(0, c - firstLen), dstOffset + firstLen);
         }
         return c;
+    }
+
+    /**
+     * Copies the newest `k = min(n, count)` samples into `dst` from
+     * `dstOffset`, oldest-first (the last one written is the newest sample).
+     * Returns k. `copyLast(dst, off, rb.count)` writes, returns and throws
+     * exactly as `copyTo(dst, off)` (the messages name `copyLast`); for a
+     * whole-window copy prefer `copyTo`.
+     *
+     * Allocates nothing in steady state under the same rule as `copyTo`: each
+     * of its three store sites (a Float32Array `dst`, a Float64Array `dst`,
+     * every other element type) stays typed while it has seen at most 4
+     * distinct `dst` hidden classes in the process (each subclass, realm and
+     * resizable-buffer variant counts as one), Node 26.8.2 arm64. The three
+     * sites are copyLast's own, not copyTo's, so each method has its own
+     * 4-class budget, except the whole-window Float32 path below: it runs
+     * copyTo's `rotCopy`, whose scalar loop is one store site shared with
+     * copyTo, so every Float32 `dst` class either method has passed through
+     * `rotCopy` counts against that one 4-class budget. Past 4 a site is
+     * megamorphic and boxes every non-integer sample (one HeapNumber per
+     * sample, as `copyTo`). The first alias check on a fresh on-heap
+     * (<= 64 B) `dst` materializes its ArrayBuffer once, as for `copyTo`
+     * (hoist the `dst`).
+     *
+     * A full ring copied whole (n >= count === capacity > 32, COPY_LOOP_MAX)
+     * into a Float32Array (a subclass counts; the type is read through the
+     * intrinsic Symbol.toStringTag getter) uses copyTo's intrinsic `set` +
+     * `copyWithin` rotation (`rotCopy`); every other copy is a masked scalar
+     * loop over the k samples. For the `set` + `subarray` copy (allocates one
+     * view per ring half it spans), see `copyLastFast`.
+     *
+     * `n` is required (an omitted n is a RangeError); `dstOffset` may be
+     * `undefined` (then 0). Checks, in order, all before the first store:
+     * TypeError (`dst` not a TypedArray), RangeError (`n` not a non-negative
+     * integer), RangeError (bounds, on `dstOffset + n`, not k: an `n` larger
+     * than `dst` can hold throws even on an empty ring), return 0 when k is
+     * 0, RangeError (alias), RangeError (storage), then the first store (a
+     * BigInt `dst` with k > 0 throws TypeError there). The checks live in a
+     * shared helper (`lastCheck`, also used by `copyLastFast`). The alias
+     * cache (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch` use, with
+     * the same rules (see `copyTo`).
+     *
+     * @param {Float32Array|Float64Array} dst destination -- caller owns it.
+     * @param {number|undefined} dstOffset undefined means 0.
+     * @param {number} n samples wanted; k = min(n, count) are copied.
+     * @returns {number} number of samples written (k = min(n, count)).
+     * @throws {TypeError} if `dst` is not a TypedArray (an Array or a
+     *         DataView), or is a BigInt64Array / BigUint64Array and k > 0.
+     *         Nothing is written.
+     * @throws {RangeError} if `n` is not a non-negative integer (NaN,
+     *         Infinity, 1.5, '1', null, undefined, 1n; no coercion, no user
+     *         `valueOf` / `toString` runs); if `dstOffset` is not a
+     *         non-negative integer or `dst.length < dstOffset + n` (as
+     *         `copyTo`, the message is built with `String(dstOffset)`); when
+     *         k > 0, if `dst` shares the ring's ArrayBuffer or `this.data`
+     *         does not hold `capacity` slots. Nothing is written.
+     */
+    copyLast(dst, dstOffset = 0, n) {
+        // Read once: lastCheck alias-checks the same array the loop copies.
+        const data = this.data;
+        const k = lastCheck(this, data, dst, dstOffset, n, 'copyLast');
+        // The literal 0, not k: an n of -0 returns +0.
+        if (k === 0) return 0;
+        const mask = this.mask;
+        const start = (this.head - k) & mask;
+        // copyLast's own three store sites, one per element family, as in copyTo.
+        const tag = TA_TAG.call(dst);
+        if (tag === 'Float32Array') {
+            if (k > COPY_LOOP_MAX && k === this.capacity) rotCopy(dst, data, dstOffset, start, k);
+            else for (let i = 0; i < k; i++) dst[dstOffset + i] = data[(start + i) & mask];
+            return k;
+        }
+        if (tag === 'Float64Array') {
+            for (let i = 0; i < k; i++) dst[dstOffset + i] = data[(start + i) & mask];
+            return k;
+        }
+        for (let i = 0; i < k; i++) dst[dstOffset + i] = data[(start + i) & mask];
+        return k;
+    }
+
+    /**
+     * Same copy, result, validation and errors as `copyLast` (the messages
+     * name `copyLastFast`), including the alias RangeError: the newest
+     * `k = min(n, count)` samples, oldest-first. Copies with at most two
+     * intrinsic `set` calls over `subarray` views, so it allocates one view
+     * per ring half it spans (nominal 104 / 208 B, from `copyToFast`'s
+     * figures). Having no per-sample store site, it never boxes a sample,
+     * however many `dst` classes the process uses.
+     * `copyLastFast(dst, off, rb.count)` writes, returns and throws exactly
+     * as `copyToFast(dst, off)` (the messages name `copyLastFast`).
+     *
+     * @param {Float32Array|Float64Array} dst destination -- caller owns it.
+     * @param {number|undefined} dstOffset undefined means 0.
+     * @param {number} n samples wanted; k = min(n, count) are copied.
+     * @returns {number} number of samples written (k = min(n, count)).
+     * @throws {TypeError} as `copyLast`. Nothing is written.
+     * @throws {RangeError} as `copyLast` (bad `n`, bad offset, `dst` too
+     *         small for `dstOffset + n`, `dst` sharing the ring's buffer, or
+     *         `this.data` not holding `capacity` slots). Nothing is written.
+     */
+    copyLastFast(dst, dstOffset = 0, n) {
+        const data = this.data;
+        const k = lastCheck(this, data, dst, dstOffset, n, 'copyLastFast');
+        // Required, not a shortcut: a BigInt dst's `set` throws even for an empty view.
+        if (k === 0) return 0;
+        const start = (this.head - k) & this.mask;
+        const firstLen = Math.min(this.capacity - start, k);
+        TA_SET.call(dst, data.subarray(start, start + firstLen), dstOffset);
+        if (firstLen < k) {
+            TA_SET.call(dst, data.subarray(0, k - firstLen), dstOffset + firstLen);
+        }
+        return k;
     }
 
     /**

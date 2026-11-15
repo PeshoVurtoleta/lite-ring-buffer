@@ -65,12 +65,31 @@
  * 'MEGA pushBatch' lanes (Float32 and Float64 src, wrapped) must still read 0;
  * maskMega, fed the same 8 classes, is their 'boxes' CONTROL. Self-check: the
  * pushBatch MEGA lanes and their controls come after the Int16 lane and
- * before the subclass lane, and no earlier MEGA lane names them.
+ * before the MEGA copyLast lanes, and no earlier MEGA lane names them.
  *
- * A build without copyToFast or pushBatch: the default target fails closed
- * (exit 2); an explicit build path (revert / must-fail runs on an older build)
- * prints its copyToFast / pushBatch rows as 'n/a'. A gated 'n/a' row fails
- * (a revert run must fail); a reported one does not.
+ * copyLast lanes (R3): copyLast(dst, 0, n) with n 120 on a full capacity-1024
+ * ring and n 1024 on a full capacity-2048 ring, each contiguous (start + n <=
+ * capacity) and straddling (the newest n wrap past slot capacity-1), into a
+ * Float32Array and a Float64Array (the masked loops: k < capacity); plus the
+ * whole window copyLast(dst, 0, count) of a full 1024 ring into a Float32Array
+ * at head 768 (the rotCopy path) and into a Float64Array. All gated at 0.
+ * copyLastFast 120 contiguous and straddling (set + subarray, one view per
+ * ring half it spans) is REPORTED, never gated.
+ * After the pushBatch MEGA block the run loop calls clPollute(): 400
+ * copyLast(d, 0, 120) calls into every other element type (Int8 .. Uint32,
+ * + Float16 when defined, as megaPollute) and 3 Float64Array subclasses
+ * (never copyTo / pushBatch), so copyLast's Float64 site holds 4 maps and a
+ * site shared with the other kinds would be megamorphic. 'MEGA copyLast 120
+ * F32 / F64 straddling' must still read 0 (a merged Float64 branch reads
+ * nominal 1920 B/op = 120 x 16 B); 'MEGA copyLast 32 -> Int16Array' is their
+ * must-allocate 'mega' CONTROL. Self-check: the MEGA copyLast lanes come after
+ * the pushBatch MEGA block and right before the subclass lane, and the Int16
+ * control is among them, else exit 2.
+ *
+ * A build without copyToFast, pushBatch or copyLast / copyLastFast: the
+ * default target fails closed (exit 2); an explicit build path (revert /
+ * must-fail runs on an older build) prints those rows as 'n/a'. A gated 'n/a'
+ * row fails (a revert run must fail); a reported one does not.
  *
  * Inlining matters: a method that returns a non-integer double boxes its result
  * whenever the call is NOT inlined (V8 returns tagged values). Run with
@@ -94,6 +113,12 @@ if (!HAS_FAST && !target) {
 const HAS_PB = typeof RingBuffer.prototype.pushBatch === 'function';
 if (!HAS_PB && !target) {
     process.stderr.write('alloc: RingBuffer.js has no pushBatch (fail closed; pass an explicit build path for a revert run)\n');
+    process.exit(2);
+}
+const HAS_CL = typeof RingBuffer.prototype.copyLast === 'function' &&
+    typeof RingBuffer.prototype.copyLastFast === 'function';
+if (!HAS_CL && !target) {
+    process.stderr.write('alloc: RingBuffer.js has no copyLast / copyLastFast (fail closed; pass an explicit build path for a revert run)\n');
     process.exit(2);
 }
 
@@ -226,6 +251,21 @@ const lanes = [
         bigThrows('CONTROL maskBig', () => maskBig(d, BIG, 64, 0, PB, 127));
         return (n) => { for (let i = 0; i < n; i++) maskBig(d, s, 64, 0, PB, 127); };
     }],
+    // copyLast (R3). Full rings: cap 1024 at 1536 pushes -> head 512 (n 120 starts at 392, contiguous); 1084 -> head 60
+    // (start 964, straddles); cap 2048 at 3584 -> head 1536 (n 1024 starts at 512); 2560 -> head 512 (start 1536,
+    // straddles). k < capacity: the masked loops. copyLast(count) on a full 1024 ring at head 768: F32 = rotCopy.
+    ['copyLast 120 F32, cap 1024 contiguous', 0, HAS_CL ? () => { const rb = filled(1024, 1536); const out = new Float32Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['copyLast 120 F32, cap 1024 straddling', 0, HAS_CL ? () => { const rb = filled(1024, 1084); const out = new Float32Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['copyLast 120 F64, cap 1024 contiguous', 0, HAS_CL ? () => { const rb = filled(1024, 1536); const out = new Float64Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['copyLast 120 F64, cap 1024 straddling', 0, HAS_CL ? () => { const rb = filled(1024, 1084); const out = new Float64Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['copyLast 1024 F32, cap 2048 contiguous', 0, HAS_CL ? () => { const rb = filled(2048, 3584); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 1024); }; } : null],
+    ['copyLast 1024 F32, cap 2048 straddling', 0, HAS_CL ? () => { const rb = filled(2048, 2560); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 1024); }; } : null],
+    ['copyLast 1024 F64, cap 2048 contiguous', 0, HAS_CL ? () => { const rb = filled(2048, 3584); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 1024); }; } : null],
+    ['copyLast 1024 F64, cap 2048 straddling', 0, HAS_CL ? () => { const rb = filled(2048, 2560); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 1024); }; } : null],
+    ['copyLast(count) F32 1024 full, head 768', 0, HAS_CL ? () => { const rb = filled(1024, 1792); const out = new Float32Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, rb.count); }; } : null],
+    ['copyLast(count) F64 1024 full, head 768', 0, HAS_CL ? () => { const rb = filled(1024, 1792); const out = new Float64Array(1024); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, rb.count); }; } : null],
+    ['copyLastFast 120, cap 1024 contiguous', 'report', HAS_CL ? () => { const rb = filled(1024, 1536); const out = new Float32Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLastFast(out, 0, 120); }; } : null],
+    ['copyLastFast 120, cap 1024 straddling', 'report', HAS_CL ? () => { const rb = filled(1024, 1084); const out = new Float32Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLastFast(out, 0, 120); }; } : null],
     // Controls: must allocate, or the counter is blind and the gate has no teeth.
     ['CONTROL subarray per op', 'view', () => { const rb = filled(32, 50); return (n) => { for (let i = 0; i < n; i++) keep[0] = rb.data.subarray(0, 4); }; }],
     // MEGA lanes: keep them last (see header). The run loop calls megaPollute() before the first one.
@@ -240,6 +280,10 @@ const lanes = [
     ['MEGA pushBatch F64 128 wrapped', 0, HAS_PB ? () => { const rb = filled(128, 192); const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) rb.pushBatch(s); }; } : null],
     ['MEGA CONTROL maskMega F32 128 wrapped', 'boxes', () => { const rb = filled(128, 192); const d = rb.data; const s = srcOf(Float32Array, PB); return (n) => { for (let i = 0; i < n; i++) maskMega(d, s, 64, 0, PB, 127); }; }],
     ['MEGA CONTROL maskMega F64 128 wrapped', 'boxes', () => { const rb = filled(128, 192); const d = rb.data; const s = srcOf(Float64Array, PB); return (n) => { for (let i = 0; i < n; i++) maskMega(d, s, 64, 0, PB, 127); }; }],
+    // The run loop calls clPollute() before the first 'MEGA copyLast' lane (copyLast into 7+ other kinds + 3 F64 subclasses).
+    ['MEGA copyLast 120 F32, straddling', 0, HAS_CL ? () => { const rb = filled(1024, 1084); const out = new Float32Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['MEGA copyLast 120 F64, straddling', 0, HAS_CL ? () => { const rb = filled(1024, 1084); const out = new Float64Array(120); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 120); }; } : null],
+    ['MEGA copyLast 32 -> Int16Array', 'mega', HAS_CL ? () => { const rb = filled(32, 50); const out = new Int16Array(32); return (n) => { for (let i = 0; i < n; i++) rb.copyLast(out, 0, 32); }; } : null],
     // LAST: 4 Float32Array subclasses + the plain class = 5 on the Float32 site (residual F1b).
     ['MEGA 32 F32 after 4 F32 subclasses', 'report', () => {
         const rb = filled(32, 50);
@@ -286,6 +330,23 @@ function pbPollute() {
     }
 }
 
+/**
+ * Before the first 'MEGA copyLast' lane: 400 copyLast(d, 0, 120) calls (straddling) into every non-float element
+ * type (+ Float16 when defined) and 3 Float64Array subclasses. Never calls copyTo or pushBatch. On a build without
+ * copyLast it does nothing (those lanes are 'n/a' and fail).
+ */
+function clPollute() {
+    if (!HAS_CL) return;
+    const kinds = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array];
+    if (typeof globalThis.Float16Array === 'function') kinds.push(globalThis.Float16Array);
+    kinds.push(class L1 extends Float64Array {}, class L2 extends Float64Array {}, class L3 extends Float64Array {});
+    const rb = filled(1024, 1084);
+    for (const K of kinds) {
+        const d = new K(1024);
+        for (let i = 0; i < 400; i++) rb.copyLast(d, 0, 120);
+    }
+}
+
 // The MEGA lanes poison copyTo's feedback for every later lane: they must be the tail, the subclass lane last.
 const megaFirst = lanes.findIndex(([name]) => name.startsWith('MEGA '));
 const megaLast = lanes.length - 1;
@@ -298,15 +359,28 @@ if (megaBad) {
     process.stderr.write('alloc: MEGA lanes must be the last lanes, the subclass lane last of all\n');
     process.exit(2);
 }
-// pbPollute() runs before the first 'MEGA pushBatch' lane: after the Int16 control, and every MEGA lane from there
-// up to the subclass lane is a pushBatch lane or a maskMega control (both kinds present); none before it.
-const isPbMega = (name) => name.startsWith('MEGA pushBatch') || name.startsWith('MEGA CONTROL maskMega');
+// clPollute() runs before the first 'MEGA copyLast' lane: after the pushBatch MEGA block, and every lane from there
+// up to the subclass lane is a 'MEGA copyLast' lane; the two gated MEGA copyLast lanes and the Int16 control are present.
+const isClMega = (name) => name.startsWith('MEGA copyLast');
+const clFirst = lanes.findIndex(([name]) => isClMega(name));
 const pbFirst = lanes.findIndex(([name]) => name.startsWith('MEGA pushBatch'));
+const CL_MEGA = ['MEGA copyLast 120 F32, straddling', 'MEGA copyLast 120 F64, straddling', 'MEGA copyLast 32 -> Int16Array'];
+let clBad = pbFirst < 0 || !(clFirst > pbFirst) || !CL_MEGA.every((m) => lanes.some(([name]) => name === m));
+for (let i = clFirst; !clBad && i < megaLast; i++) {
+    if (!isClMega(lanes[i][0])) clBad = true;
+}
+if (clBad) {
+    process.stderr.write('alloc: MEGA copyLast lanes (both gated lanes + the Int16 control) must follow the pushBatch MEGA block, right before the subclass lane\n');
+    process.exit(2);
+}
+// pbPollute() runs before the first 'MEGA pushBatch' lane: after the Int16 control, and every MEGA lane from there
+// up to the first MEGA copyLast lane is a pushBatch lane or a maskMega control (both kinds present); none before it.
+const isPbMega = (name) => name.startsWith('MEGA pushBatch') || name.startsWith('MEGA CONTROL maskMega');
 const int16At = lanes.findIndex(([name]) => name.startsWith('MEGA 32 -> Int16Array'));
 let pbBad = int16At < 0 || !(pbFirst > int16At) ||
     !lanes.some(([name]) => name.startsWith('MEGA CONTROL maskMega'));
 for (let i = megaFirst; !pbBad && i < megaLast; i++) {
-    if ((i >= pbFirst) !== isPbMega(lanes[i][0])) pbBad = true;
+    if ((i >= pbFirst && i < clFirst) !== isPbMega(lanes[i][0])) pbBad = true;
 }
 if (pbBad) {
     process.stderr.write('alloc: MEGA pushBatch lanes and maskMega controls must follow the Int16 lane, before the subclass lane\n');
@@ -328,6 +402,7 @@ for (let li = 0; li < lanes.length; li++) {
     const [name, expect, make] = lanes[li];
     if (li === megaFirst) megaPollute();
     if (li === pbFirst) pbPollute();
+    if (li === clFirst) clPollute();
     // null make: the method is missing on an explicit (older) build -> 'n/a'.
     if (make === null) { rows.push({ name, expect, net: NaN, first: NaN }); continue; }
     globalThis.gc();

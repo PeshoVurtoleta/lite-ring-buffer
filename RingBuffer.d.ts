@@ -216,6 +216,92 @@ export class RingBuffer implements Iterable<number> {
     copyToFast(dst: Float32Array | Float64Array, dstOffset?: number): number;
 
     /**
+     * Copies the newest `k = min(n, count)` samples into `dst` from
+     * `dstOffset`, oldest-first (the last sample written is the newest).
+     * Returns k. `copyLast(dst, off, rb.count)` writes, returns and throws
+     * exactly as {@link copyTo}`(dst, off)` (the messages name `copyLast`);
+     * for a whole-window copy prefer {@link copyTo}: on a full Float32 1024
+     * ring `copyLast(dst, off, count)` / `copyTo` is 1.17x [1.15..1.20] at
+     * head 0 and 1.52x [1.31..1.55] at head 768 (Float64 1.00 at both heads;
+     * ring 32: 1.01-1.03) (REPORTED, `npm run bench:copylast` strict run,
+     * 2026-11-15, Apple M4 Pro, Node v26.8.2). Against copying the whole
+     * window and then its last n, copyLast is >= 2.2x faster at n 120 and
+     * >= 1.5x at n 512 of a full 1024 ring (same source).
+     *
+     * `n` is REQUIRED (an omitted `n` is a RangeError); `dstOffset` may be
+     * `undefined` (then 0). Checks, in order, all before the first store:
+     * TypeError (`dst` not a TypedArray), RangeError (`n` not a non-negative
+     * integer; no coercion, no user `valueOf` / `toString` runs), RangeError
+     * (bounds, on `dstOffset + n`, not on k: an `n` larger than `dst` can hold
+     * throws even on an empty ring), return 0 when k is 0 (before the alias
+     * and storage checks), RangeError (alias), RangeError (storage), then the
+     * first store (a BigInt64Array / BigUint64Array `dst` with k > 0 throws
+     * TypeError there).
+     *
+     * ALLOCATION: 0 B in steady state under the same rule as {@link copyTo}:
+     * each of its three store sites (a Float32Array `dst`, a Float64Array
+     * `dst`, every other element type) stays typed while it has seen at most
+     * 4 distinct `dst` hidden classes in the process (each subclass, realm and
+     * resizable-buffer variant counts as one), Node 26.8.2 arm64; past that a
+     * site boxes every non-integer sample. The three sites are copyLast's own,
+     * not copyTo's, so each method has its own 4-class budget, EXCEPT the
+     * whole-window Float32 path: a full ring copied whole (n >= count ===
+     * capacity > 32) into a Float32Array runs copyTo's `rotCopy`, whose scalar
+     * loop is ONE store site shared with copyTo, so every Float32 `dst` class
+     * either method has passed through `rotCopy` counts against that one
+     * 4-class budget. The first alias check on a fresh on-heap (<= 64 B)
+     * `dst` materializes its ArrayBuffer once, as for copyTo (hoist the
+     * `dst`). For the `set` + `subarray` copy see {@link copyLastFast}.
+     * @param dst destination; the caller owns it.
+     * @param dstOffset first slot written; `undefined` means 0.
+     * @param n samples wanted; k = min(n, count) are copied.
+     * @returns number of samples written (k = min(n, count)).
+     * @throws TypeError if `dst` is not a TypedArray (an Array or a
+     *         DataView), or is a BigInt64Array / BigUint64Array and k > 0.
+     *         Nothing is written.
+     * @throws TypeError (or the user's own error) if `dstOffset` is a
+     *         null-prototype object or its `toString` throws, as {@link copyTo}
+     *         (the bounds message is built with `String(dstOffset)`).
+     * @throws RangeError if `n` is not a non-negative integer (NaN, Infinity,
+     *         1.5, '1', null, undefined, 1n); if `dstOffset` is not a
+     *         non-negative integer or `dst.length < dstOffset + n`; when
+     *         k > 0, if `dst` shares the ring's ArrayBuffer or `this.data` does
+     *         not hold `capacity` slots. Nothing is written.
+     */
+    copyLast(dst: Float32Array | Float64Array, dstOffset: number | undefined, n: number): number;
+
+    /**
+     * Same copy, result, validation order and errors as {@link copyLast} (the
+     * messages name `copyLastFast`), including the alias RangeError and the
+     * k = 0 early return before the alias and storage checks: the newest
+     * `k = min(n, count)` samples, oldest-first. Copies with at most two
+     * intrinsic `set` calls over `subarray` views, so it ALLOCATES one view
+     * per ring half it spans (nominally the `copyToFast` figures, 104 B
+     * contiguous / 208 B straddling; REPORTED by the `npm run alloc` lanes
+     * `copyLastFast 120, cap 1024 contiguous` / `straddling`, 104.0 / 208.0
+     * B/op, Node v26.8.2 arm64, 2026-11-15). Having no per-sample store site
+     * it never boxes a sample, whatever the number of `dst` classes. Not for
+     * a zero-GC hot path; {@link copyLast} is the zero-allocation form (within
+     * its 4-class rule and the `rotCopy` budget it shares with copyTo; see
+     * {@link copyLast}).
+     * `copyLastFast(dst, off, rb.count)` writes, returns and throws exactly as
+     * {@link copyToFast}`(dst, off)` (the messages name `copyLastFast`).
+     * @param dst destination; the caller owns it.
+     * @param dstOffset first slot written; `undefined` means 0.
+     * @param n samples wanted (required); k = min(n, count) are copied.
+     * @returns number of samples written (k = min(n, count)).
+     * @throws TypeError as {@link copyLast}. Nothing is written.
+     * @throws TypeError (or the user's own error) if `dstOffset` is a
+     *         null-prototype object or its `toString` throws, as {@link copyTo}
+     *         (the bounds message is built with `String(dstOffset)`).
+     * @throws RangeError as {@link copyLast} (bad `n`, bad offset, `dst` too
+     *         small for `dstOffset + n`; when k > 0, `dst` sharing the ring's
+     *         buffer or `this.data` not holding `capacity` slots). Nothing
+     *         is written.
+     */
+    copyLastFast(dst: Float32Array | Float64Array, dstOffset: number | undefined, n: number): number;
+
+    /**
      * Visit live samples oldest -> newest. Zero allocation with a hoisted
      * callback, for ONE callback function per process: a second distinct
      * callback costs about 128 B per 8-sample call (REPORTED, audit 2026-11-12).
