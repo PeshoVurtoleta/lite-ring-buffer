@@ -202,7 +202,7 @@ The constructor rounds the requested capacity up to the next power of two:
 | 1024 | 1024 | 1023 |
 | 1025 | 2048 | 2047 |
 
-Wrap-around becomes `head = (head + 1) & mask` -- a single AND instead of a `%` modulo, which on V8 is roughly 3-5× cheaper in tight loops.
+Wrap-around becomes `head = (head + 1) & mask` -- a single AND instead of a `%` modulo. Measured per wrap step (`wrap-step n1024`), `% capacity` costs 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity (1024) and 5.630x [5.583..5.799] at a non-power-of-two capacity (1023); inside a whole hand-rolled Float32Array push (`wrap-push`) the gaps are 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. Provenance: see [Comparison (REPORTED)](#comparison-reported) below.
 
 ### Layout
 
@@ -265,6 +265,24 @@ Timing is STATISTICAL and REPORTED, not gated (`npm run bench:copyto`, dev-only,
 Layouts: contig = full ring, head 0; wrap = full ring, head n/2; part = count n-1, head n/2. Medians of 63 paired ratios per config; ns are medians per call. The per-config [Q1..Q3] ranges come from `npm run bench:copyto` (run under a strict quiet lock), which prints them. A/A medians in this run were 0.987..1.014 (the noise floor to read the ratios against). The audit-fix build against the previous build (63eb5bc1), same day, K 21 x 3, one quiet-lock hold, QUIET at hold start (load1 1.64; 4.40 at this run's start after the hold's earlier steps, 3.99 at end): TIE in 30 of 30 configs, medians 0.99-1.11x (n = 32: 1.09-1.11x; n >= 64: 0.99-1.07x).
 
 Two consequences of the alias-check cache: the ring carries two enumerable own keys, `_bufOf` and `_buf` (they show in `Object.keys`, and `JSON.stringify` of a ring that has copied serializes its storage twice), and a replaced `data` (and its buffer) stays referenced until the next non-empty copy, non-empty `pushBatch` or `destroy()`; `reset()` does not release it. On a frozen, sealed or non-extensible ring the keys are never updated: the array cached before the lock stays referenced until `destroy()`, or for the ring's lifetime when frozen (`destroy()` throws a TypeError on a frozen ring, it cannot write it). `this.data` is read once per call, before the checks. Validation lives in a shared helper, so an error's stack has two extra frames vs 1.2.1 (the error builder and `copyCheck`); messages are unchanged.
+
+### Comparison (REPORTED)
+
+RingBuffer against what a user would write instead: a hand-rolled `Float32Array` ring, a hand-rolled `Array` ring, and the `lite-o1` `RingDeque`. Ring of 1024 samples (32 for the copyTo n 32 row). Each cell is ns/op (median) and, in parentheses, the ratio against the RingBuffer method (median of per-round ratios; below 1 = faster than RingBuffer, above 1 = slower).
+
+| Operation | RingBuffer method | Hand-rolled Float32Array ring | Hand-rolled Array ring | lite-o1 RingDeque (emulated) |
+|---|---|---|---|---|
+| push | 1.01 | 1.01 (0.998x) | 1.04 (1.035x) | 2.13 (2.116x) |
+| get / getOrDefault (RingBuffer: `getOrDefault(i, 0)`) | 0.92 | 0.54 (0.595x) | 0.44 (0.481x) | N/A (no indexed read) |
+| copyTo n 32 (full ring, head n/2, Float32 dst) | 24.62 | 12.74 (0.517x) | 13.56 (0.550x) | 12.68 (0.514x) |
+| copyTo n 1024 (full ring, head n/2, Float32 dst) | 277.01 | 390.40 (1.411x) | 411.70 (1.484x) | 386.05 (1.393x) |
+
+- RingBuffer is slower than the hand-rolled loops on `get` / `getOrDefault` and on `copyTo` n 32, and faster on `copyTo` n 1024. No cause was measured here.
+- `get(i)` is 1.896x [1.880..1.908] `getOrDefault(i, 0)` (1.73 ns vs 0.92 ns) and allocates 15.99 B/op, matching the documented 16 B box; `getOrDefault` and the other timed columns read 0.00 B/op (the resolution of this bench is 8 B; `npm run alloc` is the 0 B gate).
+- RingDeque cells are emulations: push is `if (size === capacity) popFront(); pushBack(v)`; copy is `forEach` with a hoisted store callback. RingDeque is a Float64 double-ended queue that throws when full or on NaN, a structure for a different purpose (lite-o1), not a worse ring.
+- Ratios against hand-rolled loops include driver-inlining effects: how well V8 inlines each column into the measuring loop is part of the number.
+- Provenance: one strict QUIET run under `quiet-lock run --strict`, 2026-11-15T17:21Z, Apple M4 Pro (12 cores), Darwin 27.2.0 arm64, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.62 at start / 1.68 at end, K 21 rounds x 3 compilations, every row VALID, judge exit 0; RingBuffer.js 90f7ad7c at HEAD 6431ec9; lite-o1 1.11.3; another node process read 11.5% CPU at the start sample (recorded, not judged). A/A twin and SLOW / BOX controls ran per row. The wrap-cost figures in "Why power-of-two capacity" above come from the same run.
+- Reproduce: `npm run bench:compare` (dev-only, not in `verify`, not shipped).
 
 ---
 
@@ -351,6 +369,7 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `npm run bench:pushbatch` | `node test/bench/pushbatch-ab.mjs` (with `test/bench/pushbatch-probe.mjs`; dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B harness for `pushBatch`. REPORTED only. |
 | `npm run bench:copyto` | `node test/bench/copyto-ab.mjs` (dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B of `copyTo` against a before build (default `git show HEAD:RingBuffer.js`), K 21 rounds x 3 compilations, with A/A and must-fail controls. REPORTED only. |
 | `npm run bench:copylast` | `node test/bench/copylast-ab.mjs` (with `test/bench/copylast-probe.mjs`; dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B of `copyLast` against a caller's `copyTo` + loop (n 120 / 512 on a 1024 ring) and of `copyLast(count)` against `copyTo`, with A/A and must-fail controls. REPORTED only. |
+| `npm run bench:compare` | `node test/bench/compare.mjs` (with `test/bench/compare-probe.mjs`; dev-only, not shipped, REPORTED: not in `verify`; quotable only from a strict quiet-lock run). Public comparison of RingBuffer against a hand-rolled `Float32Array` ring, a hand-rolled `Array` ring and lite-o1 `RingDeque` (push, get / getOrDefault, copyTo n 32 / 1024, plus the `% capacity` vs `& mask` wrap lanes), K 21 rounds x 3 compilations, with an A/A twin and SLOW and BOX controls per row. Options: `--smoke` (K 5 x 1 compilation, not quotable), `--self-test`, `--out DIR`, `--K N` (5..1001), `--comp N` (1..10), `--control box|aa|slow`, `--keep`. Exit 0: every row VALID on a quiet host; 1: any row VOID or a red self-test; 2: usage / git / staging error or host not quiet. |
 | `npm run torture` | `test/torture.mjs` (dev-only): lite-leak retention and lite-gc-profiler GC budget (below). |
 | `npm run ascii` | `test/ascii.mjs`: fails on any non-ASCII character in `package.json`, the `files[]` entries and `test/` (U+00D7 and U+00B5 are allowed). |
 | `npm run verify` | `npm test && npm run alloc && npm run torture && npm run ascii` |
@@ -388,7 +407,7 @@ flowchart LR
 ## FAQ
 
 **Why power-of-two capacity? Why not just take the user's number?**
-Because `head & mask` is a single instruction; `head % capacity` is a division. The cost difference is invisible on a single call but very real in tight emit loops where `push` is called once per frame *per metric* across dozens of metrics.
+Because wrap-around is then `head & mask`, one AND, and the comparison section above measures what `% capacity` costs against it: 1.784x [1.759..1.829] per wrap step at the same power-of-two capacity, 1.057x [1.042..1.203] inside a whole hand-rolled push, and 5.630x / 3.204x at a non-power-of-two capacity (REPORTED, same run).
 
 **Why `Float32Array` and not `Float64Array`?**
 Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` into a Float32Array is a same-type copy with no conversion.

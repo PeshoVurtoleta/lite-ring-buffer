@@ -223,9 +223,10 @@ After 1.3.0 ships. One small burst: planner -> coder -> reviewer, then ONE run u
 - Reuse the copyto-ab machinery: A/A twin, SLOW control, B/op lane, K interleaved rounds + IQR, 3 compilations.
 - Dev-only `npm run bench:compare`, not in verify; gates nothing.
 - README gets one table with provenance (date, host, load, Node, run count).
-- Either backs README:179 "roughly 3-5x cheaper" with a REPORTED source, or that claim is removed.
+- Either backs README.md:205 "roughly 3-5x cheaper" with a REPORTED source, or that claim is removed.
 Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12).
-The M1 research burst closed 2026-11-15 (M1 dropped, see Parked); B1 is next.
+The M1 research burst closed 2026-11-15 (M1 dropped, see Parked).
+STATUS 2026-11-15: done in the working tree, awaiting the maintainer's commit (unit B1: bench + strict run + docs). `npm run bench:compare` (dev-only, REPORTED); one strict QUIET run, every row VALID, evidence `.handoff/B1/strict-1/compare.md`. The README "3-5x" claim is replaced by the measured figures and the README has the comparison table (LEDGER B12 / C18).
 
 ## Docs-only fillers
 

@@ -32,7 +32,8 @@
     "deopt-diff": "node test/tools/deopt-diff.mjs",
     "bench:copyto": "node test/bench/copyto-ab.mjs",
     "bench:copylast": "node test/bench/copylast-ab.mjs",
-    "bench:pushbatch": "node test/bench/pushbatch-ab.mjs"
+    "bench:pushbatch": "node test/bench/pushbatch-ab.mjs",
+    "bench:compare": "node test/bench/compare.mjs"
   },
   "keywords": [
     "ring-buffer",
@@ -67,6 +68,7 @@
   "devDependencies": {
     "@zakkster/lite-gc-profiler": "^1.16.0",
     "@zakkster/lite-leak": "^1.10.0",
+    "@zakkster/lite-o1": "^1.11.3",
     "@zakkster/lite-signal": "^1.5.2",
     "@zakkster/lite-utils": "1.0.0"
   }

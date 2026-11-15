@@ -53,17 +53,17 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, C15, C17, D7, B10)*
+   C8, C10, C11, C15, C17, C18, D7, B10)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
    lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
-   derived from another measurement is not a measurement. *(A11, B4, C9, D4, D16, D17)*
+   derived from another measurement is not a measurement. *(A11, B4, B12, C9, D4, D16, D17)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim about allocation is a claim about every caller path.** "Zero allocation" holds only
@@ -728,6 +728,14 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   split of copyLast's own sites). Reopen the design only with a measured MEGA ROT need that clears copyTo's
   byte-identical gates.
 
+### B12. README claimed `& mask` is roughly 3-5x cheaper than `%` with no source
+
+- **What happened.** The README said the `& mask` wrap-around "on V8 is roughly 3-5x cheaper in tight loops" with no run log (law 5). B1 measured it (`wrap-step n1024`, `wrap-push n1024`; REPORTED): `% capacity` costs 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity (1024) and 5.630x [5.583..5.799] at a non-power-of-two capacity (1023); inside a hand-rolled Float32Array push 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. Only against a non-power-of-two `%` does the measured gap reach the claimed band (3.204x inside a push, 5.630x per step); at the same power-of-two capacity it is 1.784x per step and 1.057x inside a push.
+- **Root cause.** An estimate written as a measurement.
+- **Evidence.** `.handoff/B1/strict-1/compare.md` (one strict QUIET run, 2026-11-15T17:21Z, Apple M4 Pro, Node v26.8.2, load1 2.62 at start / 1.68 at end, K 21 x 3 compilations, HEAD 6431ec9, RingBuffer.js 90f7ad7c); README before the fix: `.handoff/B1/frozen/README.md` 829475e5 (= `git show 6431ec9:README.md`).
+- **Law.** 5.
+- **Gate.** None (REPORTED). `npm run bench:compare` prints the QUOTE-OP / QUOTE-PUSH lines.
+
 ---
 
 ## C. Gate evolution (gates that had to be given teeth)
@@ -1019,6 +1027,15 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1.
 - **Gate.** `test/qa-m1.test.js` Q1-Q4 (revert checks: Q1-Q3 red on MK_countEarly, Q4 red on MM_lenBeforeHook). Reopens
   if copyLast / copyLastFast gain a read of ring or dst state with no row whose hook mutates that state.
+
+### C18. The B1 bench judge failed open on a missing or short `rounds` field and printed a PRELIMINARY host's ratio as quotable
+
+- **What happened.** Caught by review round 1 (compare.mjs 2eea7409 -> 21a15822): a compilation with no `rounds` pooled nothing and the row stayed VALID; a probe with a different K was accepted; the QUOTE lines tagged smoke but not a non-quiet host; MOD_NP2's capacity was unlabelled.
+- **Root cause.** The judge trusted the probe's output shape instead of checking it (laws 1, 2).
+- **Fix.** `rounds` length == K >= 5 per compilation, the probe's K is checked, a host tag is on the QUOTE lines, every per-round ratio is finite and > 0, VOID rows mask their ns cells, and the MOD / MOD_NP2 capacities are named on the QUOTE lines (COL_NOTE label).
+- **Evidence.** compare.mjs 2eea7409 -> 21a15822; `.handoff/B1/reviews/code-review.md`; fix-revert runs `.handoff/B1/coder/mut/fix.{rounds,perround,hosttag,nsmask}.out`.
+- **Law.** 1, 2.
+- **Gate.** `node test/bench/compare.mjs --self-test` (106 checks; reverting the rounds, per-round-ratio, host-tag, ns-mask or COL_NOTE-label fix turns it red; the probe-K accept check, compare.mjs:518, has no self-test case).
 
 ---
 

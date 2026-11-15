@@ -10,6 +10,16 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Docs
+
+- README: the unsourced wrap-cost claim (`& mask` roughly 3-5x cheaper than `%`) is replaced by measured figures (REPORTED, one strict QUIET run 2026-11-15, Apple M4 Pro, Node v26.8.2, load1 2.62 at start / 1.68 at end, K 21 x 3 compilations): per wrap step `% capacity` is 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity and 5.630x [5.583..5.799] at a non-power-of-two one; inside a hand-rolled Float32Array push 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. The FAQ no longer says `%` is a division.
+- README: new "Comparison (REPORTED)" table (push, get / getOrDefault, copyTo n 32 / 1024 against hand-rolled Float32Array and Array rings and lite-o1 RingDeque), with provenance.
+
+### Tests
+
+- New dev-only `npm run bench:compare` (`test/bench/compare.mjs` + `compare-probe.mjs`; REPORTED, not in `verify`, not shipped).
+- devDependency `@zakkster/lite-o1` ^1.11.3 (maintainer-ruled 2026-11-15); runtime `dependencies` stays empty.
+
 ## [1.5.2] - 2026-11-15
 
 ### Docs
