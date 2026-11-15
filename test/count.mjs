@@ -11,13 +11,15 @@
 //
 // A test file added or removed here updates FILES and EXPECTED together.
 // EXPECTED is pinned to the "tests N" line of a plain
-// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js test/mutant-kills.test.js test/qa-r1.test.js test/DeoptTool.test.js test/pushbatch.test.js test/qa-r2.test.js test/copylast.test.js test/copylast-parity.test.js test/qa-r3.test.js`
-// (60 + 35 + 30 + 9 + 10 + 10 + 15 + 7 + 20 + 25 + 3 + 7 + 19 + 9 + 22 = 281), not to this file's tally.
+// `node --expose-gc --test test/RingBuffer.test.js test/InliningTool.test.js test/copyto.test.js test/copyto-r1b.test.js test/audit-fix.test.js test/mutant-kills.test.js test/qa-r1.test.js test/DeoptTool.test.js test/pushbatch.test.js test/qa-r2.test.js test/copylast.test.js test/copylast-parity.test.js test/qa-r3.test.js test/chainsize.test.js test/copylast-hooks.test.js test/qa-m1.test.js`
+// (60 + 35 + 30 + 9 + 10 + 10 + 15 + 7 + 48 + 7 + 19 + 9 + 22 + 5 + 4 + 4 = 294, one number per file, in FILES
+// order, each from that file's own run), not to this file's tally. pushbatch's 48 was written as 20 + 25 + 3 in
+// earlier headers; a run of that file reports one number, 48.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js', 'test/mutant-kills.test.js', 'test/qa-r1.test.js', 'test/DeoptTool.test.js', 'test/pushbatch.test.js', 'test/qa-r2.test.js', 'test/copylast.test.js', 'test/copylast-parity.test.js', 'test/qa-r3.test.js'];
-const EXPECTED = 281;
+const FILES = ['test/RingBuffer.test.js', 'test/InliningTool.test.js', 'test/copyto.test.js', 'test/copyto-r1b.test.js', 'test/audit-fix.test.js', 'test/mutant-kills.test.js', 'test/qa-r1.test.js', 'test/DeoptTool.test.js', 'test/pushbatch.test.js', 'test/qa-r2.test.js', 'test/copylast.test.js', 'test/copylast-parity.test.js', 'test/qa-r3.test.js', 'test/chainsize.test.js', 'test/copylast-hooks.test.js', 'test/qa-m1.test.js'];
+const EXPECTED = 294;
 
 process.exitCode = 1;
 

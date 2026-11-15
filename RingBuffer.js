@@ -328,6 +328,53 @@ function lastNError(name, n) {
 }
 
 /**
+ * Carries `lastCheck`'s `dst instanceof DataView` answer to `lastArgError`,
+ * so a call observes `dst`'s DataView-ness at most once. A boolean, never a
+ * reference: nothing is retained. Shared by every ring and by both
+ * `copyLast` and `copyLastFast`; correct because nothing within the contract
+ * runs between the hot write and the cold read (the one call in that window
+ * is the intrinsic length getter's `call`; a replaced
+ * `Function.prototype.call` is unsupported). The file's only `var`: a
+ * module `let` costs 7 B of the chain's 1 B margin (LEDGER A15 R3-M2).
+ */
+var lastDv = false;
+
+/**
+ * Cold-path builder for `lastCheck`'s type / `n` / bounds throw site. Called
+ * only after one of those checks failed, it returns the error 1.5.0 threw:
+ * TypeError (not a TypedArray, or a DataView), then the native TypeError of
+ * the intrinsic length read (an other-realm DataView, X10), then the `n`
+ * RangeError, else the bounds RangeError. It reads `lastDv` first, before
+ * any builtin call. When `n` and `dstOffset` passed, the hot body asked
+ * `instanceof` and `lastDv` is that answer; only when one of them failed
+ * does it ask `dst instanceof DataView` itself (the call's only ask). So a
+ * view `dst` sees exactly one `instanceof DataView` per call.
+ */
+function lastArgError(name, dst, n, dstOffset) {
+    // Read first: nothing within the contract runs between the hot write and this read.
+    const dv = lastDv;
+    if (!ArrayBuffer.isView(dst)) return dstTypeError(name, dst);
+    // The hot body asked `instanceof` iff n and dstOffset passed; then lastDv is its answer of THIS call.
+    if (Number.isInteger(n) && n >= 0 && Number.isInteger(dstOffset) && dstOffset >= 0 ? dv : dst instanceof DataView) return dstTypeError(name, dst);
+    const dlen = TA_LENGTH.call(dst);
+    if (!Number.isInteger(n) || n < 0) return lastNError(name, n);
+    return boundsError(name, n, dstOffset, dlen);
+}
+
+/**
+ * Cold-path builder for `lastCheck`'s alias / storage throw site. Called only
+ * after one of those checks failed; alias first, then storage. It compares
+ * `dst`'s buffer with the same `buf` the hot body compared: the cached
+ * `_buf` when `data` is the cached array (the hot body has just keyed it on
+ * a miss), else `data`'s buffer re-read through the intrinsic getter (a miss
+ * on a non-extensible ring, which stores no key).
+ */
+function lastStateError(rb, data, dst, name) {
+    if (TA_BUFFER.call(dst) === (data === rb._bufOf ? rb._buf : TA_BUFFER.call(data))) return aliasError(name);
+    return storageError(name, TA_LENGTH.call(data), rb.capacity);
+}
+
+/**
  * The shared prologue of `copyLast` and `copyLastFast` (so the two validate
  * identically by construction): `copyCheck`'s checks with `n` validated and
  * the bounds taken on `n`. It reuses `copyTo`'s error builders and
@@ -342,6 +389,34 @@ function lastNError(name, n) {
  * store. `data` is the array the caller will copy from (read once by the
  * caller), so both checks cover exactly the copied array.
  *
+ * The body has two throw sites: a failing type / `n` / bounds check throws
+ * the error `lastArgError` builds, a failing alias / storage check the one
+ * `lastStateError` builds; each cold builder re-tests, so the error thrown
+ * is the first failing check's in the order above. The hot body tests
+ * isView, `n`, `dstOffset`, `dst instanceof DataView` (its answer stored in
+ * `lastDv`), then the bounds (1.5.0: isView, `instanceof`, the length read,
+ * `n`, the bounds); the errors are still chosen in 1.5.0's order: TypeError
+ * (`dst`), the native TypeError of the intrinsic length read for an
+ * other-realm DataView (X10), the `n` RangeError, the bounds RangeError.
+ * The `n` / `dstOffset` tests run no user code, so moving them first
+ * changes no outcome, and `instanceof` still runs before the length read.
+ * A view `dst` sees exactly one `instanceof DataView` per call (a user
+ * `DataView[Symbol.hasInstance]` sees one call): the hot answer is reused
+ * when `n` and `dstOffset` passed, and `lastArgError` asks itself only when
+ * one of them failed.
+ *
+ * The checks call the GLOBAL `ArrayBuffer.isView`, `Number.isInteger` and
+ * `DataView` (its Symbol.hasInstance) and the intrinsic length getter's
+ * `call` at call time. A failing call may call `isView` / `isInteger` more
+ * times than 1.5.0, and a bounds failure reads `dst`'s length twice. A
+ * replaced builtin or `Function.prototype.call` is unsupported (out of
+ * contract). A failing alias / storage call re-reads the intrinsic getters.
+ *
+ * The inlined chain copyLast + lastCheck + rotCopy is held at <= 766 B of
+ * bytecode (V8's cumulative-inlining reserve, 920 / 1.2; 765 B on the
+ * pinned V8) by test/chainsize.test.js, so copyLast stays inlinable into
+ * its caller: a byte added to any of the three can bring the call back.
+ *
  * `data`'s buffer comes from `copyCheck`'s identity-keyed cache on the ring
  * (`_bufOf` / `_buf`, shared with `copyTo` / `copyToFast` / `pushBatch`),
  * with the same rules: re-read through the intrinsic getter whenever `data`
@@ -351,16 +426,14 @@ function lastNError(name, n) {
  * SharedArrayBuffer limit.
  */
 function lastCheck(rb, data, dst, dstOffset, n, name) {
-    // isView alone also admits a DataView, which has no indexed slots or `set`.
-    if (!ArrayBuffer.isView(dst) || dst instanceof DataView) throw dstTypeError(name, dst);
-    const dlen = TA_LENGTH.call(dst);
-    if (!Number.isInteger(n) || n < 0) throw lastNError(name, n);
+    // One throw site for the type / n / bounds checks; lastArgError picks the error in order.
     // `!(x <= len)`, not `x > len`: a NaN on either side must fail the check.
-    if (!Number.isInteger(dstOffset) || dstOffset < 0 || !(dstOffset + n <= dlen)) {
-        throw boundsError(name, n, dstOffset, dlen);
+    if (!ArrayBuffer.isView(dst) || !Number.isInteger(n) || n < 0 || !Number.isInteger(dstOffset) ||
+        dstOffset < 0 || (lastDv = dst instanceof DataView) || !(dstOffset + n <= TA_LENGTH.call(dst))) {
+        throw lastArgError(name, dst, n, dstOffset);
     }
-    const c = rb.count;
-    const k = n < c ? n : c;
+    let k = rb.count;
+    if (n < k) k = n;
     if (k !== 0) {
         let buf = rb._buf;
         if (data !== rb._bufOf) {
@@ -371,10 +444,8 @@ function lastCheck(rb, data, dst, dstOffset, n, name) {
             }
         }
         // Fail closed: copying a ring into its own storage would overwrite
-        // samples before they are read.
-        if (TA_BUFFER.call(dst) === buf) throw aliasError(name);
-        const len = TA_LENGTH.call(data);
-        if (len !== rb.capacity) throw storageError(name, len, rb.capacity);
+        // samples before they are read. One throw site; lastStateError picks alias, then storage.
+        if (TA_BUFFER.call(dst) === buf || TA_LENGTH.call(data) !== rb.capacity) throw lastStateError(rb, data, dst, name);
     }
     return k;
 }
@@ -752,10 +823,15 @@ export class RingBuffer {
      * integer), RangeError (bounds, on `dstOffset + n`, not k: an `n` larger
      * than `dst` can hold throws even on an empty ring), return 0 when k is
      * 0, RangeError (alias), RangeError (storage), then the first store (a
-     * BigInt `dst` with k > 0 throws TypeError there). The checks live in a
-     * shared helper (`lastCheck`, also used by `copyLastFast`). The alias
-     * cache (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch` use, with
-     * the same rules (see `copyTo`).
+     * BigInt `dst` with k > 0 throws TypeError there). That error order is
+     * unchanged from 1.5.0, and a view `dst` sees exactly one
+     * `dst instanceof DataView` per call (a user `DataView[Symbol.hasInstance]`
+     * runs once). The checks call the global `ArrayBuffer.isView`,
+     * `Number.isInteger` and `DataView` at call time; a replaced builtin or
+     * `Function.prototype.call` is unsupported (see `lastCheck`). The checks
+     * live in a shared helper (`lastCheck`, also used by `copyLastFast`).
+     * The alias cache (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch`
+     * use, with the same rules (see `copyTo`).
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number|undefined} dstOffset undefined means 0.
@@ -804,7 +880,9 @@ export class RingBuffer {
      * figures). Having no per-sample store site, it never boxes a sample,
      * however many `dst` classes the process uses.
      * `copyLastFast(dst, off, rb.count)` writes, returns and throws exactly
-     * as `copyToFast(dst, off)` (the messages name `copyLastFast`).
+     * as `copyToFast(dst, off)` (the messages name `copyLastFast`). The
+     * checks are `copyLast`'s (one `dst instanceof DataView` per call for a
+     * view `dst`; replaced builtins unsupported): see its note.
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number|undefined} dstOffset undefined means 0.

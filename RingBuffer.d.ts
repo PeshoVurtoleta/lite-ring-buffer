@@ -219,14 +219,24 @@ export class RingBuffer implements Iterable<number> {
      * Copies the newest `k = min(n, count)` samples into `dst` from
      * `dstOffset`, oldest-first (the last sample written is the newest).
      * Returns k. `copyLast(dst, off, rb.count)` writes, returns and throws
-     * exactly as {@link copyTo}`(dst, off)` (the messages name `copyLast`);
-     * for a whole-window copy prefer {@link copyTo}: on a full Float32 1024
-     * ring `copyLast(dst, off, count)` / `copyTo` is 1.17x [1.15..1.20] at
-     * head 0 and 1.52x [1.31..1.55] at head 768 (Float64 1.00 at both heads;
-     * ring 32: 1.01-1.03) (REPORTED, `npm run bench:copylast` strict run,
-     * 2026-11-15, Apple M4 Pro, Node v26.8.2). Against copying the whole
-     * window and then its last n, copyLast is >= 2.2x faster at n 120 and
-     * >= 1.5x at n 512 of a full 1024 ring (same source).
+     * exactly as {@link copyTo}`(dst, off)` (the messages name `copyLast`).
+     * For a whole-window copy {@link copyTo} is the safe choice: the parity
+     * ratio `copyLast(dst, off, count)` / `copyTo` has medians of 0.99-1.02
+     * over two strict runs (Float32 1024 ring 1.02 / 1.01 at head 0 and
+     * 1.02 / 1.01 at head 768, Float64 1.00 / 0.99 at head 0 and 1.00 / 1.00
+     * at head 768, ring 32: 1.02 / 1.02 (Float32), 1.02 / 1.01 (Float64)),
+     * with one slow compilation at head 768 in each run (Float32 1.18 in the
+     * first, Float64 1.19 in the second); parity is not guaranteed, it
+     * depends on the caller's inlining budget (a caller with no budget left
+     * inlines neither method). Against
+     * copying the whole window and then its last n, copyLast is 2.1x
+     * (Float32) / 2.2x (Float64) faster at n 120 and 1.5x (Float32) / 1.2x
+     * (Float64) at n 512 of a full 1024 ring (the lower of the two runs; all
+     * REPORTED: `npm run bench:copylast`, two strict runs 2026-11-15, 63
+     * paired rounds per row, host QUIET, Apple M4 Pro, Node v26.8.2). The inlined
+     * chain copyLast + lastCheck + rotCopy is 765 B of bytecode, within V8's
+     * 766 B reserve on that Node (1.5.0: 791 B), held by
+     * `test/chainsize.test.js` (DETERMINISTIC, pinned engine).
      *
      * `n` is REQUIRED (an omitted `n` is a RangeError); `dstOffset` may be
      * `undefined` (then 0). Checks, in order, all before the first store:
@@ -236,7 +246,17 @@ export class RingBuffer implements Iterable<number> {
      * throws even on an empty ring), return 0 when k is 0 (before the alias
      * and storage checks), RangeError (alias), RangeError (storage), then the
      * first store (a BigInt64Array / BigUint64Array `dst` with k > 0 throws
-     * TypeError there).
+     * TypeError there). The error for every input is unchanged from 1.5.0. A
+     * view `dst` sees exactly one `dst instanceof DataView` per call (a user
+     * `DataView[Symbol.hasInstance]` runs once). Only replaced builtins can
+     * tell it from 1.5.0: `n` / `dstOffset` are tested before the DataView
+     * check, a failing call may call the global `ArrayBuffer.isView` /
+     * `Number.isInteger` more often, and a bounds failure with a valid
+     * `dstOffset` reads `dst`'s length twice. The checks use the GLOBAL
+     * `ArrayBuffer.isView`, `Number.isInteger`, `DataView` and the intrinsic
+     * length getter's `call` at call time; replacing any of them, replacing
+     * `Function.prototype.call`, or giving that getter an own `call` property
+     * is unsupported (out of contract).
      *
      * ALLOCATION: 0 B in steady state under the same rule as {@link copyTo}:
      * each of its three store sites (a Float32Array `dst`, a Float64Array
@@ -272,7 +292,9 @@ export class RingBuffer implements Iterable<number> {
 
     /**
      * Same copy, result, validation order and errors as {@link copyLast} (the
-     * messages name `copyLastFast`), including the alias RangeError and the
+     * messages name `copyLastFast`; one `dst instanceof DataView` per call and
+     * the same out-of-contract rule for replaced builtins, see
+     * {@link copyLast}), including the alias RangeError and the
      * k = 0 early return before the alias and storage checks: the newest
      * `k = min(n, count)` samples, oldest-first. Copies with at most two
      * intrinsic `set` calls over `subarray` views, so it ALLOCATES one view
