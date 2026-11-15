@@ -8,7 +8,9 @@ Allocation figures below are bytes per call from `npm run alloc`
 over 5 steady-state windows, empty-loop baseline subtracted), Node 26.8.2
 arm64, 2026-10-14. Not timed, so host load does not affect them.
 
-## [Unreleased]
+## [1.5.0] - 2026-11-15
+
+New `copyLast(dst, dstOffset, n)` and `copyLastFast` (R3), plus the `pushBatch` doc fixes of the 1.4.0 post-release audit. Alloc and torture figures below are from the R3 build 9765c21e (Node v26.8.2 arm64, 2026-11-15), PRELIMINARY host (another node process >= 100% CPU; load1 1.54 at the release verify start vs baseline 2.21); both are untimed counts.
 
 ### Added
 
@@ -17,7 +19,7 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ### Tests
 
-- `npm test` count 229 -> 259: new `test/copylast.test.js` (19) and `test/copylast-parity.test.js` (9), and `test/mutant-kills.test.js` 8 -> 10 (`EXPECTED` and `FILES` in `test/count.mjs`). The R3 mutant set (24 mutants) is killed in full.
+- `npm test` count 229 -> 281: new `test/copylast.test.js` (19), `test/copylast-parity.test.js` (9) and `test/qa-r3.test.js` (22, an independent boundary suite: cap 1 / 2 rings, `dst` edges, -0, resizable / growable / detached / other-realm / offset-subarray `dst`, destroyed and frozen rings, interleaved cache states, a `copyLastFast` parity matrix), and `test/mutant-kills.test.js` 8 -> 10 (`EXPECTED` and `FILES` in `test/count.mjs`). The R3 mutant set (24 mutants) is killed in full.
 - `npm run alloc` gains the `copyLast` lanes (n 120 / 1024, contiguous and straddling, Float32 and Float64 `dst`; the whole window at head 768), the REPORTED `copyLastFast` lanes and the `MEGA copyLast` lanes with an Int16 must-allocate control. `npm run torture` gains the gated lanes `copyLast 120 straddling F32+F64` (250,000 ops) and `copyLast(count) ROT full 1024` (125,000 ops), and its buffer-retention tracker covers `copyLast`.
 - New dev-only `npm run bench:copylast` (`test/bench/copylast-ab.mjs` + `test/bench/copylast-probe.mjs`; STATISTICAL: strict quiet lock, not in `verify`, not shipped): interleaved A/B of `copyLast` against a caller's `copyTo` + loop and of `copyLast(count)` against `copyTo`.
 
