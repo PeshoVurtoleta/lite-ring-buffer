@@ -4,7 +4,7 @@
 // Intrinsics (Number.isInteger, the TypedArray getters) are captured at load, so a replaced global cannot reach it.
 // Hooks: a stateful DataView[Symbol.hasInstance] and Proxy prototypes on the dst; each call's outcome, dst slots,
 // ring state and hook / trap event sequence must equal the model's.
-//   T1  stage H, 31,464 rows (2 methods x 3 ring fills x 6 hooks x 19 dsts x (9 n x 5 offsets + omitted form)).
+//   T1  stage H, 43,776 rows (2 methods x 3 ring fills x 6 hooks x 19 dsts x (9 n x 7 offsets + omitted form)).
 //   T2  literal golden rows (cut from the frozen 1.5.0 build): a second instanceof call (parked 0083e04b) shows here.
 //   T3  re-entry: a hasInstance hook that re-enters copyLast once (30 rows), live == model.
 //   T4  re-entry: a replaced Number.isInteger that re-enters copyLast once (30 rows; out of contract, pinned
@@ -175,7 +175,9 @@ const DSTS_H = {
     i16: (rb) => new Int16Array(rb.capacity + 6).fill(-99),
 };
 const NS_H = [2, 0, -0, -1, 1.5, NaN, '1', 100, undefined];
-const OFFS_H = [0, -0, -1, NaN, 5];
+// 7 offsets: integer, -0, negative, NaN, past-the-end, plus a fractional (1.5) and a non-number ('1'): the last two
+// never reach the hot body's `instanceof`, so a lastArgError that ignored them would read a stale flag.
+const OFFS_H = [0, -0, -1, NaN, 5, 1.5, '1'];
 const METHODS = ['copyLast', 'copyLastFast'];
 const FILLS = [0, 3, 11];
 
@@ -228,8 +230,8 @@ test('T1 stage H: hooks and Proxy prototypes, live == model15 (outcome, slots, s
     } finally {
         delete DataView[Symbol.hasInstance];
     }
-    assert.equal(rows, 31464, 'row count');
-    assert.equal(hookRows, 23460, 'rows where the hook must run once');
+    assert.equal(rows, 43776, 'row count');
+    assert.equal(hookRows, 32640, 'rows where the hook must run once');
     assert.equal(nMism, 0, nMism + ' mismatching rows, first: ' + shown.join(' | '));
     assert.equal(badHi, 0, badHi + ' rows with a wrong hook call count: ' + bad.join(' | '));
     assert.ok(maxGp <= 1, 'at most one prototype-trap walk per row, saw ' + maxGp);
@@ -238,7 +240,7 @@ test('T1 stage H: hooks and Proxy prototypes, live == model15 (outcome, slots, s
 
 // ---------------------------------------------------------------- T2: golden rows
 // Expected values are literals cut from the frozen 1.5.0 build (9765c21e) by the unpark evidence run; the ring is
-// mkRing(8, m), the hook installed for the one call only. Row 7's slots are by hand: m = 11 keeps pushes 3..10 of
+// mkRing(8, m), the hook installed for the one call only. The 'ret 2' row's slots are by hand: m = 11 keeps pushes 3..10 of
 // VALS[i % 12] + (i % 5); the newest two are i = 9 -> 9 + 4 = 13 and i = 10 -> Infinity + 0.
 const TWO_RE = 'RangeError: LiteRingBuffer: copyLast needs 0 slots from offset 5 (dst.length 3)';
 const GOLDEN = [
@@ -249,6 +251,9 @@ const GOLDEN = [
     ['copyLastFast', 3, 'throw2', 'f32', -1, 0, 'RangeError: LiteRingBuffer: copyLastFast needs a non-negative integer n (got -1)', 'hi1', [-99, -99]],
     ['copyLast', 3, 'none', 'pxFlip', -0, -0, 'ret 0', 'gp1', [-99, -99]],
     ['copyLastFast', 11, 'liar', 'f32', 2, 0, 'TypeError: LiteRingBuffer: copyLastFast needs a TypedArray dst (got object)', 'hi', [-99, -99]],
+    // fractional / non-number offset: outcome and event cut from the frozen 1.5.0 build (one hook call, bounds error)
+    ['copyLast', 11, 'count', 'f32', 2, 1.5, 'RangeError: LiteRingBuffer: copyLast needs 2 slots from offset 1.5 (dst.length 14)', 'hi', [-99, -99]],
+    ['copyLast', 11, 'count', 'f32', 2, '1', 'RangeError: LiteRingBuffer: copyLast needs 2 slots from offset 1 (dst.length 14)', 'hi', [-99, -99]],
     ['copyLast', 11, 'count', 'f32', 2, 0, 'ret 2', 'hi', [13, Infinity, -99, -99]],
     ['copyLast', 3, 'count', 'small', 0, -0, 'ret 0', 'hi', [-99, -99, -99]],
     ['copyLast', 3, 'count', 'arr', 2, 0, 'TypeError: LiteRingBuffer: copyLast needs a TypedArray dst (got object)', '', [-99, -99]],
@@ -268,7 +273,7 @@ test('T2 golden rows from the frozen 1.5.0 build: live and model15 both match (o
     } finally {
         delete DataView[Symbol.hasInstance];
     }
-    assert.equal(rows, 18, 'row count');
+    assert.equal(rows, 22, 'row count');
     assert.equal(bad.length, 0, bad.length + ' mismatches, first: ' + bad.slice(0, 3).join(' | '));
     assert.ok(restored(), 'globals restored');
 });

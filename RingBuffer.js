@@ -334,8 +334,10 @@ function lastNError(name, n) {
  * `copyLast` and `copyLastFast`; correct because nothing within the contract
  * runs between the hot write and the cold read (the one call in that window
  * is the intrinsic length getter's `call`; a replaced
- * `Function.prototype.call` is unsupported). The file's only `var`: a
- * module `let` costs 7 B of the chain's 1 B margin (LEDGER A15 R3-M2).
+ * `Function.prototype.call`, or a user-defined own `call` property on that
+ * getter, would run user code in that window and is unsupported). The file's
+ * only `var`: a module `let` costs 7 B of the chain's 1 B margin (LEDGER
+ * A15 R3-M2).
  */
 var lastDv = false;
 
@@ -408,9 +410,12 @@ function lastStateError(rb, data, dst, name) {
  * The checks call the GLOBAL `ArrayBuffer.isView`, `Number.isInteger` and
  * `DataView` (its Symbol.hasInstance) and the intrinsic length getter's
  * `call` at call time. A failing call may call `isView` / `isInteger` more
- * times than 1.5.0, and a bounds failure reads `dst`'s length twice. A
- * replaced builtin or `Function.prototype.call` is unsupported (out of
- * contract). A failing alias / storage call re-reads the intrinsic getters.
+ * times than 1.5.0. A bounds failure with `n` and `dstOffset` both
+ * non-negative integers reads `dst`'s length twice (the hot body, then
+ * `lastArgError`); on an `n` / `dstOffset` failure the hot body never
+ * reads it. A replaced builtin or `Function.prototype.call` is unsupported
+ * (out of contract). A failing alias / storage call re-reads the intrinsic
+ * getters.
  *
  * The inlined chain copyLast + lastCheck + rotCopy is held at <= 766 B of
  * bytecode (V8's cumulative-inlining reserve, 920 / 1.2; 765 B on the
@@ -792,8 +797,8 @@ export class RingBuffer {
      * Copies the newest `k = min(n, count)` samples into `dst` from
      * `dstOffset`, oldest-first (the last one written is the newest sample).
      * Returns k. `copyLast(dst, off, rb.count)` writes, returns and throws
-     * exactly as `copyTo(dst, off)` (the messages name `copyLast`); for a
-     * whole-window copy prefer `copyTo`.
+     * exactly as `copyTo(dst, off)` (the messages name `copyLast`). For a
+     * whole-window copy `copyTo` is the safe choice.
      *
      * Allocates nothing in steady state under the same rule as `copyTo`: each
      * of its three store sites (a Float32Array `dst`, a Float64Array `dst`,

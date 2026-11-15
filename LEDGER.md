@@ -172,6 +172,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   capacity)` (N rings in one Float32Array): its only driver is the ShellyProject fleet case;
   unpark only when ShellyProject is committed and names RingBank as a dependency, then a research
   burst and a ruled PROPOSAL first.
+  Update 2026-11-15: M1's deadline (the release after R3 = 1.5.1) passed unmeasured. RULING Q-M1-DEADLINE =
+  "C Measure it next": "Make it a research burst (spike-first ladder, its own session) before B1; nothing is
+  dropped now." (maintainer, AskUserQuestion; options were A Drop it, B Keep it parked, C Measure it next).
+  M1 stays PARKED until that research burst ends; the adopt rule (STATISTICAL win only) is unchanged. (This M1 is
+  the ROADMAP Parked item, not the "M1 unpark unit" of A15 / C17 / D16.)
 - **Root cause.** No consumer or no measured win; "an engine detail is not a reason to ship code".
 - **Evidence.** ROADMAP.md "Parked"; b6a8310.
 - **Law.** 13.
@@ -371,7 +376,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `subarray` view per ring half, not measured this cycle); Q-R3-STRICT = "A Rule now, strict in build". Maintainer,
   2026-11-15, AskUserQuestion, one sitting (`.handoff/archive/1.5.0/PROPOSAL-r3.md` section 7).
 - **R3-M1 addition (2026-11-15): the mechanism is the caller's cumulative-inlining budget.** FILLER R3-M1 (research
-  ladder, `.handoff/research/r3-m1/`, build b690e9c / 9765c21e, no source edit; `test/bench/copylast-ab.mjs`
+  ladder, `.handoff/archive/1.5.1/research/r3-m1/`, build b690e9c / 9765c21e, no source edit; `test/bench/copylast-ab.mjs`
   unmodified with `--cand` on research variants, parity rows, Float32; every run `quiet-lock run` non-strict exit 2 =
   host PRELIMINARY only, every A/A / SLOW / B/op / BOX / oracle / TurboFan check in band). (1) Rung 1: moving the n check
   (OUT_N) or the n check + min (OUT_NM) out of lastCheck into copyLast's body: 1.15 / 1.53 and 1.17 / 1.54 vs LIVE 1.14 /
@@ -391,35 +396,36 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (RangeError instead of 1.5.0's native TypeError; pinned by test/copylast.test.js "kills X10"); e20476df reads the
   length in the cold builder first (hot body unchanged, 278 B) and matches 1.5.0 on 260,580 cases (copyLast +
   copyLastFast, 10 dst kinds incl. that one; storage, cache-hit and frozen-ring paths not in the matrix). Still unknown: why a called ROT path costs more in
-  proportion to the rotate work. Evidence: `.handoff/research/r3-m1/PROGRESS.md` rungs 0-3a, `runs/rung1-*`,
+  proportion to the rotate work. Evidence: `.handoff/archive/1.5.1/research/r3-m1/PROGRESS.md` rungs 0-3a, `runs/rung1-*`,
   `runs/rung2-*`, `runs/rung2-trace/`, `runs/rung3a-*` (2026-11-15T03:20Z-03:42Z, Apple M4 Pro, Node v26.8.2 / V8
   14.6.202.34-node.28, K 21 x 3 compilations per row, load1 3.78-6.24 vs baseline 2.21, another package's node process
   at 100-133% CPU; every timing PRELIMINARY; the strict hold of LIVE vs SLIM2 was not run). Law 13: the waiver
-  (Q-R3-PARGAP A) stands until `.handoff/PROPOSAL-r3-m1.md` is ruled; adopting SLIM2 needs a strict A/B with
+  (Q-R3-PARGAP A) stands until `.handoff/archive/1.5.1/PROPOSAL-r3-m1.md` is ruled; adopting SLIM2 needs a strict A/B with
   copyLast(count) / copyTo <= 1.05 at h0 and h768, behaviour parity, and a gate on the chain size (its margin is < 2 B
   and depends on V8's bytecode sizes and budget constants, and on the caller: a caller with no budget left inlines
   neither method).
   RULING (R3-M1): Q-M1-ADOPT = "A Build SLIM2"; Q-M1-GATE = "A Chain-size gate in npm test"; Q-M1-STRICT = "A In the
-  build unit". Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3-m1.md` section 6).
-  SLIM2 build unit (2026-11-15, `.handoff/M1/`, before build a771a79 / 9765c21e): PARKED after review APPROVED. The
+  build unit". Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/archive/1.5.1/PROPOSAL-r3-m1.md` section 6).
+  SLIM2 build unit (2026-11-15, `.handoff/archive/1.5.1/M1/`, before build a771a79 / 9765c21e): PARKED after review APPROVED. The
   candidate (0083e04b) took SLIM2's hot body token for token (lastCheck 278 B, chain 765 B, copyTo chain 737 B unchanged;
   every other function byte-identical) with one SPEC change: lastStateError compares the same `buf` the hot body compared
   (`data === rb._bufOf ? rb._buf : TA_BUFFER(data)`), because SLIM2's re-read broke the shipped poisoned-cache test
   (D14). Gates built: `test/chainsize.test.js` + `test/tools/chain-size.mjs` (chain <= 766 on the pinned Node v26.8.2
   / V8 14.6.202.34-node.28; frozen 791 fails, padded 794 fails, 13 of 14 reviewer mutants caught), a hasInstance-count
-  test (1 call passing, 2 failing; red on 9765c21e), the unit parity gate `.handoff/M1/gate/parity.mjs` (367,806 cases,
+  test (1 call passing, 2 failing; red on 9765c21e), the unit parity gate `.handoff/archive/1.5.1/M1/gate/parity.mjs` (367,806 cases,
   0 mismatches, controls SLIM2 + an off-by-one twin caught), npm test 288/288; `--trace-turbo-inlining` (REPORTED,
   PRELIMINARY host): copyLast inlines into the driver on 0083e04b (2 lines), not on 9765c21e (0 in 3 repeats; the
   frozen result depends on tier-up order). The review found that the double `dst instanceof DataView` on a failing call
   is more than "two calls": a user `DataView[Symbol.hasInstance]` that answers differently or throws on the second call,
   or a Proxy getPrototypeOf trap in dst's prototype chain, changes WHICH error is thrown vs 1.5.0 (reviewer probe:
   TypeError or the hook's own error where 1.5.0 throws the n RangeError). RULING Q-M1-HOOK = "B Park, research first"
-  (maintainer, 2026-11-15, AskUserQuestion). Parked as `.handoff/rejected/M1-slim2/` (park-rejected.mjs, base = HEAD
+  (maintainer, 2026-11-15, AskUserQuestion). Parked as `.handoff/rejected/M1-slim2/` (restored by the unpark unit; now
+  `.handoff/archive/1.5.1/rejected/M1-slim2.restored-1794720601539/`) (park-rejected.mjs, base = HEAD
   a771a79). Unpark (law 13): a cold path that observes `dst`'s DataView-ness at most once per call (reuses the hot
   result, or tests a brand the user cannot hook) with the chain still <= 766 B on the pinned V8, the same parity gate
   at 0 mismatches incl. stateful-hook and Proxy-prototype rows, then the strict A/B (Q-M1-STRICT A). The waiver
   (Q-R3-PARGAP A) stands.
-  R3-M2 addition (2026-11-15, research pass `.handoff/research/r3-m2/`, HEAD c2910c0 / 9765c21e, no source edit;
+  R3-M2 addition (2026-11-15, research pass `.handoff/archive/1.5.1/research/r3-m2/`, HEAD c2910c0 / 9765c21e, no source edit;
   variants from the parked 0083e04b; every figure DETERMINISTIC unless REPORTED): one DataView observation per call
   FITS. Refused, with the run that killed each: ORD_A (hot order isView, n, dstOffset, instanceof, bounds; the cold
   builder infers the hot answer by brand + bounds; 765 B) mismatches 1.5.0 on 294 stage-H rows -- a TypedArray that
@@ -433,37 +439,38 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `(lastDv = dst instanceof DataView)` into a module-scope `var` (2 B), the cold builder reading `lastDv` first and
   asking `instanceof` itself only when the hot body did not (bad n / dstOffset), and lastCheck's min rewritten as
   `let k = rb.count; if (n < k) k = n;` (-2 B; the nominal estimate was -4): lastCheck 278 B, chain 765 B. Oracle
-  `research/r3-m2/parity-m2.mjs` (the M1 gate + stage H: 6 hasInstance hooks x 19 dsts incl. Proxy prototypes, event
+  `.handoff/archive/1.5.1/research/r3-m2/parity-m2.mjs`
+  (the M1 gate + stage H: 6 hasInstance hooks x 19 dsts incl. Proxy prototypes, event
   sequence vs 1.5.0): matrix 367,806 / 0, stage H 31,464 / 0 (A/A 0, 23,460 hook rows, max 1 call per row; parked
   0083e04b control 18,306); overlay `npm test` 281/281; reentry O1 0 / 30, O3 0 / 30 outcome differences;
   `--trace-turbo-inlining` (REPORTED, load1 3.81): copyLast inlines into its driver 3 / 3 (frozen 0 / 3). Mutants of C:
   MB / MC / MF / ME caught by stage H, MD equivalent, MA (late flag read) caught only by the O3 re-entry rows. Not
-  measured: speed (the hot body now writes a module context slot per call). Evidence: `.handoff/research/r3-m2/
-  PROGRESS.md` rungs 0-4 + claim review, `runs/`, `review/`; `.handoff/PROPOSAL-r3-m2.md` (2 claim-review rounds,
+  measured: speed (the hot body now writes a module context slot per call). Evidence: `.handoff/archive/1.5.1/research/r3-m2/
+  PROGRESS.md` rungs 0-4 + claim review, `runs/`, `review/`; `.handoff/archive/1.5.1/PROPOSAL-r3-m2.md` (2 claim-review rounds,
   both LITERAL, fixed). Node v26.8.2 / V8 14.6.202.34-node.28, Apple M4 Pro, 2026-11-15.
   RULING (R3-M2): Q-M2-ADOPT = "A Unpark with C"; Q-M2-O3 = "A Out of contract, documented" (replaced builtins /
   `Function.prototype.call` unsupported; docs state the call-time globals and the new check order); Q-M2-TEST = "A
   Port stage H to npm test" (incl. n 0 / -0 rows and the O3 re-entry outcome rows; revert checks on 0083e04b, MA, ME).
-  Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3-m2.md` section 7). Unpark unit (next
+  Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/archive/1.5.1/PROPOSAL-r3-m2.md` section 7). Unpark unit (next
   burst): restore M1-slim2, apply C's delta, re-review, then the strict A/B (Q-M1-STRICT A); the waiver
   (Q-R3-PARGAP A) stands until that A/B passes. Reopen ORD_A / BRAND only if exact 1.5.0 parity on hooked or
   re-prototyped dsts is waived; a carrier with no module state only with a hot byte payback that keeps the chain
   <= 766 B.
-  M1 unpark addition (2026-11-15, `.handoff/M1/unpark/`, plan `.handoff/M1/PLAN-delta-unpark.md`; before build c2910c0 /
+  M1 unpark addition (2026-11-15, `.handoff/archive/1.5.1/M1/unpark/`, plan `.handoff/archive/1.5.1/M1/PLAN-delta-unpark.md`; before build c2910c0 /
   9765c21e): the unpark condition of the SLIM2 build unit is met. M1-slim2 restored, candidate C's 3 hunks applied
   (5a2e12e1, identical to GLB_O_MIN2), then JSDoc only (9e70b525, stripped identity to 5a2e12e1; frozen
-  `.handoff/M1/frozen/RingBuffer.unpark-9e70b525.js`). Chain copyLast 295 + lastCheck 278 + rotCopy 192 = 765 B
+  `.handoff/archive/1.5.1/M1/frozen/RingBuffer.unpark-9e70b525.js`). Chain copyLast 295 + lastCheck 278 + rotCopy 192 = 765 B
   (<= 766), copyTo chain 737 B unchanged; parity-m2 matrix 367,806 / 0 and stage H 31,464 / 0 (parked 0083e04b control
   18,306 mismatching rows; SLIM2 and the off-by-one twin caught). Gates: test/chainsize.test.js (+ an M1-N1 row, red under
   mutant m13), test/copylast-hooks.test.js (4, the stage-H port of Q-M2-TEST A; red on 0083e04b, ME and MA; replaces
   the parked build's hasInstance-count test, never committed), test/qa-m1.test.js (4, qa; C17); npm test 294/294. Review APPROVED (overlay
-  `.handoff/M1/unpark/review/r1/`, 0 blockers, 3 nits). qa PASS: 756 probe rows equal to 1.5.0
-  (`.handoff/M1/unpark/qa/probe.mjs`). Strict A/B (`npm run bench:copylast`, cand 9e70b525 vs ref 9765c21e, Apple M4
+  `.handoff/archive/1.5.1/M1/unpark/review/r1/`, 0 blockers, 3 nits). qa PASS: 756 probe rows equal to 1.5.0
+  (`.handoff/archive/1.5.1/M1/unpark/qa/probe.mjs`). Strict A/B (`npm run bench:copylast`, cand 9e70b525 vs ref 9765c21e, Apple M4
   Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations = 63 paired rounds per row, every timed column
   0.00 B/op), two runs, each `quiet-lock run --strict` exit 0, host QUIET, baseline 2.21: strict-1
-  (`.handoff/M1/ab/strict-1/`, 2026-11-15T05:55Z, load1 1.09 -> 1.66): Float32 1024 copyLast(count) / copyTo h0
+  (`.handoff/archive/1.5.1/M1/ab/strict-1/`, 2026-11-15T05:55Z, load1 1.09 -> 1.66): Float32 1024 copyLast(count) / copyTo h0
   1.016 [0.973..1.043], h768 1.017 [1.009..1.174], h768 compilation medians 1.016 / 1.181 / 1.007; strict-2
-  (`.handoff/M1/ab/strict-2/`, 2026-11-15T06:08Z, load1 2.20 -> 1.73): h0 1.009 [0.964..1.019], h768 1.007
+  (`.handoff/archive/1.5.1/M1/ab/strict-2/`, 2026-11-15T06:08Z, load1 2.20 -> 1.73): h0 1.009 [0.964..1.019], h768 1.007
   [0.999..1.030], every Float32 compilation median <= 1.046; Float64 h768 one compilation 1.193 (row median 1.00; D16).
   1.5.0 read 1.17 (h0) / 1.52 (h768) on the strict host (above). Caller rows (lower of the two runs, minimum over both
   heads): n 120 2.1x (Float32) / 2.2x (Float64), n 512 1.5x / 1.2x faster than the caller workaround.
@@ -983,7 +990,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 - **What happened.** In the M1 unpark qa pass, mutant MK_countEarly (9e70b525 with `let k = rb.count;` moved above the
   type / n / bounds check; chain still 765 B, so test/chainsize.test.js cannot see it) passed every other shipped test
-  file (`.handoff/M1/unpark/qa/logs/suite-MK_countEarly.log`, 285 pass / 0 fail; `test/tools/chain-size.mjs` on MK: 765,
+  file (`.handoff/archive/1.5.1/M1/unpark/qa/logs/suite-MK_countEarly.log`, 285 pass / 0 fail; `test/tools/chain-size.mjs` on MK: 765,
   ok). 1.5.0 reads `rb.count` after `dst instanceof
   DataView`, so a user `DataView[Symbol.hasInstance]` hook that resets, destroys or pushes into the ring during the
   check changes what the call copies; MK copies the stale count. Mutant MM_lenBeforeHook (dst's length read before the
@@ -993,7 +1000,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   identical were unpinned (law 1).
 - **Fix.** test/qa-m1.test.js (4, expectations are literals from the frozen 1.5.0 build a771a79): Q1-Q3 hook resets /
   destroys / pushes into the ring mid-check, Q4 hook resizes / transfers a resizable dst buffer mid-check.
-- **Evidence.** `.handoff/M1/unpark/qa/` (`mut/MK_countEarly.js`, `mut/MM_lenBeforeHook.js`, `ov-MK_countEarly/`,
+- **Evidence.** `.handoff/archive/1.5.1/M1/unpark/qa/` (`mut/MK_countEarly.js`, `mut/MM_lenBeforeHook.js`, `ov-MK_countEarly/`,
   `ov-MM_lenBeforeHook/`, `logs/`), 2026-11-15, Node v26.8.2; header of `test/qa-m1.test.js`; fd7af97.
 - **Law.** 1.
 - **Gate.** `test/qa-m1.test.js` Q1-Q4 (revert checks: Q1-Q3 red on MK_countEarly, Q4 red on MM_lenBeforeHook). Reopens
@@ -1205,7 +1212,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   the non-inlined compile (cause not isolated; rung 3b not run), which here scales with the work inside (~8 ns to
   ~86-92 ns), so a byte-level change anywhere in the chain can move the ratio by 1.5x. Relocating code into an inlined
   callee leaves the graph roughly the same (reading) but changes the chain's bytecode size, which decides caller inlining.
-- **Evidence.** `.handoff/research/r3-m1/PROGRESS.md` rungs 1, 2, 3a; `runs/rung2-trace/` (default / 2400 / 300 /
+- **Evidence.** `.handoff/archive/1.5.1/research/r3-m1/PROGRESS.md` rungs 1, 2, 3a; `runs/rung2-trace/` (default / 2400 / 300 /
   slim2 / slim traces); `runs/rung1-*`, `runs/rung2-*`, `runs/rung3a-*` (2026-11-15, hosts as stated there, PRELIMINARY).
 - **Law.** 12 (scope a measurement: name what the driver inlines), 13.
 - **Gate.** None (research). A speed comparison between two methods records `--trace-turbo-inlining` for each driver
@@ -1221,10 +1228,10 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   test/copylast.test.js on SLIM2 in an overlay confirmed it: 18 / 19 pass, the poisoned-cache test (lines 419-431) fails.
 - **Root cause.** A research behaviour matrix covers only the rows it generates; the shipped suite already pinned the
   uncovered path, and nobody ran it on the variant. The claim review checked the matrix, not the suite.
-- **Evidence.** `.handoff/M1/evidence/t0/c-overlay-copylast.log` (overlay of SLIM2 e20476df, 2026-11-15, Node v26.8.2);
-  `.handoff/M1/PLAN.md` SPEC; `.handoff/research/r3-m1/PROGRESS.md` rung 3a (the uncovered-path note).
+- **Evidence.** `.handoff/archive/1.5.1/M1/evidence/t0/c-overlay-copylast.log` (overlay of SLIM2 e20476df, 2026-11-15, Node v26.8.2);
+  `.handoff/archive/1.5.1/M1/PLAN.md` SPEC; `.handoff/archive/1.5.1/research/r3-m1/PROGRESS.md` rung 3a (the uncovered-path note).
 - **Law.** 1, 2 (an unverified path is not "equal").
-- **Gate.** `.handoff/M1/gate/parity.mjs` (unit gate; parked with M1) has poisoned-cache, storage and frozen-ring rows and
+- **Gate.** `.handoff/archive/1.5.1/M1/gate/parity.mjs` (unit gate; parked with M1) has poisoned-cache, storage and frozen-ring rows and
   uses SLIM2 as a must-fail control. A research variant that claims behaviour parity also runs the full shipped suite in
   an overlay before the claim is made.
 
@@ -1239,7 +1246,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Root cause.** (1) The row lists were copied from the shapes 1.5.0's checks care about, not from the variant's own
   new branch conditions. (2) Each stage-H row is one call with fresh state; a design with cross-call state needs rows
   that interleave calls inside the window where that state is live.
-- **Evidence.** `.handoff/research/r3-m2/review/` (mutants, `parity-m2-n0.mjs`, `probe-n0.mjs`), `runs/h-only-ME-n0.json`
+- **Evidence.** `.handoff/archive/1.5.1/research/r3-m2/review/` (mutants, `parity-m2-n0.mjs`, `probe-n0.mjs`), `runs/h-only-ME-n0.json`
   (1,224 mismatches after the fix), `runs/reentry.json`; PROPOSAL-r3-m2 section 7 (2026-11-15, Node v26.8.2).
 - **Law.** 1 (a control must fire on the variant's own boundary), 2.
 - **Gate.** `parity-m2.mjs` NS_H / OFFS_H include 0, -0 (and -0 offset); Q-M2-TEST A ports those rows and the O3
@@ -1258,7 +1265,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   build's inlining result depends on tier-up order); 21 rounds share that one outcome, so a per-compilation median is a
   sample of size 1 of the compilation outcome, not of the timing. Not traced which decision differed in the slow
   compilation.
-- **Evidence.** `.handoff/M1/ab/strict-1/ab.json`, `.handoff/M1/ab/strict-2/ab.json` (2026-11-15T05:55Z / 06:08Z,
+- **Evidence.** `.handoff/archive/1.5.1/M1/ab/strict-1/ab.json`, `.handoff/archive/1.5.1/M1/ab/strict-2/ab.json` (2026-11-15T05:55Z / 06:08Z,
   Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 1.09 -> 1.66 / 2.20 -> 1.73 vs baseline 2.21, K 21 x 3
   compilations); RULING Q-M1-STRICT A (A15).
 - **Law.** 5 (a measured number enters docs from this cycle's run logs: here, both runs).

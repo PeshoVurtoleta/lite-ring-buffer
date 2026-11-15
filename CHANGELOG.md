@@ -10,6 +10,15 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Docs
+
+- README / llms.txt integer-precision note gains the monotonic energy-counter example (Wh totals belong in the caller's Float64 columns).
+- Comments only, no code change: `RingBuffer.js` comment clarifications from the 1.5.1 review: `lastCheck`'s length-read note (twice only on a bounds failure with valid `n` and `dstOffset`), the `lastDv` window note (an own `call` on the length getter is out of contract), `copyLast`'s whole-window note now matches the docs (`copyTo` is the safe choice).
+
+### Tests
+
+- `test/copylast-hooks.test.js` offset rows gain a fractional and a non-number `dstOffset` (31,464 -> 43,776 stage-H rows, 9 -> 11 golden rows; test count unchanged).
+
 ## [1.5.1] - 2026-11-15
 
 ### Changed

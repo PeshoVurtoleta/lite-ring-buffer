@@ -5,7 +5,7 @@
 // 1.5.0 build (a771a79); this file imports only ../RingBuffer.js. Every hook is removed in finally and
 // each test asserts it.
 //
-// Revert checks (.handoff/M1/unpark/qa/): Q1-Q3 fail on a same-size reorder that reads rb.count before the
+// Revert checks (.handoff/archive/1.5.1/M1/unpark/qa/): Q1-Q3 fail on a same-size reorder that reads rb.count before the
 // type / n / bounds check (MK_countEarly; the shipped suite passes it, chain 765); Q4 fails on a build that
 // reads dst's length before the hook runs (MM_lenBeforeHook).
 import { test } from 'node:test';

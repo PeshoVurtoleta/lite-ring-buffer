@@ -43,7 +43,7 @@ rb.copyTo(out, 0);                          // oldest-first; out[0] = oldest
 ## Constraints
 
 - ESM only.
-- Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision. A finite `|x| >= 2^128 - 2^103` (about 3.4e38, just past the float32 max 3.4028234663852886e38) stores as +/-Infinity: `push(1e39)` stores `+Infinity` although `1e39` passes `v === v`, so input NaN / finite checks do not predict the stored value.
+- Stores `number` values that round-trip through float32. Integers up to 2^24 are exact; larger integers lose precision (a monotonic energy counter in Wh crosses 2^24 = 16,777,216, so Wh totals belong in the caller's Float64 columns, not in this ring). A finite `|x| >= 2^128 - 2^103` (about 3.4e38, just past the float32 max 3.4028234663852886e38) stores as +/-Infinity: `push(1e39)` stores `+Infinity` although `1e39` passes `v === v`, so input NaN / finite checks do not predict the stored value.
 - `push` / `tryPush` coerce like a typed-array store: `null`, `''` and `[]` store 0, `undefined` stores NaN (map missing readings to NaN yourself).
 - NaN and +/-Infinity are stored and read back unchanged. Downstream consumers must filter NaN where it matters (e.g. min/max).
 - After `destroy()` the instance is unusable.

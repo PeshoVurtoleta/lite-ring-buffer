@@ -180,16 +180,16 @@ parity gate is output / throw only (Q-R3-PARGAP); the strict A/B runs in the bui
 
 BUILT 2026-11-15 (bb0459b / 9765c21e; review APPROVED; qa PASS 2026-11-15, +22 boundary tests in test/qa-r3.test.js); shipped in 1.5.0: `copyLast` + `copyLastFast`, 281 tests;
 the strict A/B (`npm run bench:copylast`) exit 0 (see LEDGER A15).
-MECHANISM FOUND 2026-11-15 (FILLER R3-M1, research ladder `.handoff/research/r3-m1/`, PRELIMINARY; LEDGER A15 "R3-M1
+MECHANISM FOUND 2026-11-15 (FILLER R3-M1, research ladder `.handoff/archive/1.5.1/research/r3-m1/`, PRELIMINARY; LEDGER A15 "R3-M1
 addition", D13): the copyLast(count) gap is the caller's cumulative-inlining budget (copyLast's inlined chain 791 B is
 over 920 / 1.2, copyTo's 737 B is not), not either body. A trimmed lastCheck (SLIM2, chain 765 B) inlines and ties copyTo;
-`.handoff/PROPOSAL-r3-m1.md` RULED 2026-11-15 (maintainer, AskUserQuestion, one sitting; PROPOSAL section 6):
+`.handoff/archive/1.5.1/PROPOSAL-r3-m1.md` RULED 2026-11-15 (maintainer, AskUserQuestion, one sitting; PROPOSAL section 6):
 Q-M1-ADOPT = "A Build SLIM2"; Q-M1-GATE = "A Chain-size gate in npm test"; Q-M1-STRICT = "A In the build unit".
-SLIM2 BUILD PARKED 2026-11-15 (`.handoff/M1/`, review APPROVED, then RULING Q-M1-HOOK = "B Park, research first"):
+SLIM2 BUILD PARKED 2026-11-15 (`.handoff/archive/1.5.1/M1/`, review APPROVED, then RULING Q-M1-HOOK = "B Park, research first"):
 on a failing call the double `dst instanceof DataView` lets a stateful user hasInstance hook or a Proxy prototype trap
-change which error is thrown. Parked as `.handoff/rejected/M1-slim2/`. Next: a research pass for a cold path that
+change which error is thrown. Parked as `.handoff/rejected/M1-slim2/` (restored by the unpark unit; now `.handoff/archive/1.5.1/rejected/M1-slim2.restored-1794720601539/`). Next: a research pass for a cold path that
 observes DataView-ness once with the chain <= 766 B (LEDGER A15 SLIM2 build unit, D14). The waiver (Q-R3-PARGAP A) stands.
-R3-M2 RULED 2026-11-15 (`.handoff/PROPOSAL-r3-m2.md`): Q-M2-ADOPT = "A Unpark with C" (candidate GLB_O_MIN2
+R3-M2 RULED 2026-11-15 (`.handoff/archive/1.5.1/PROPOSAL-r3-m2.md`): Q-M2-ADOPT = "A Unpark with C" (candidate GLB_O_MIN2
 5a2e12e1: new hot check order, the hot `instanceof` answer carried in a module `var`, min rewritten; chain 765 B,
 parity 0 incl. 31,464 stage-H hook rows, suite 281/281); Q-M2-O3 = "A Out of contract, documented"; Q-M2-TEST =
 "A Port stage H to npm test". Next: the unpark unit (restore M1-slim2, apply C, re-review, strict A/B, docs, qa,
@@ -224,12 +224,13 @@ After 1.3.0 ships. One small burst: planner -> coder -> reviewer, then ONE run u
 - README gets one table with provenance (date, host, load, Node, run count).
 - Either backs README:179 "roughly 3-5x cheaper" with a REPORTED source, or that claim is removed.
 Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12).
+Waits for the M1 research burst (RULING Q-M1-DEADLINE, 2026-11-15).
 
 ## Docs-only fillers
 
 - README Ecosystem line: DONE in 1.2.0 (0412025), R1 step 3; the README states the 104 / 208 B per frame; R1 (99e8749) made that line state 0 B (docs batch B4).
 - README / llms.txt NOT FOR ("integers above 2^24"): add the monotonic energy-counter example (Wh totals
-  belong in the caller's Float64 columns, not in this ring).
+  belong in the caller's Float64 columns, not in this ring). DONE 2026-11-15 (post-1.5.1 housekeeping, working tree).
 
 ## Parked
 
@@ -256,6 +257,12 @@ hoists bounds checks is not measured, and per-element cost is likely dominated b
 a STATISTICAL win (interleaved A/B at 1024 and 8192 samples, quiet host, must-fail control). If it has not
 run by the release after R3, record a null result here and drop it. An engine detail is not a reason to ship
 code.
+
+RULING Q-M1-DEADLINE 2026-11-15 (maintainer, AskUserQuestion, the post-1.5.1 housekeeping burst): 1.5.1 is the release after R3 and M1
+never ran; options were A "Drop it", B "Keep it parked", C "Measure it next"; ruled "C Measure it next", "Make it a research burst
+(spike-first ladder, its own session) before B1; nothing is dropped now." The deadline rule above is superseded
+by that research burst: it adopts M1 only on a STATISTICAL win as written above, else records the null result
+here and drops M1. (This M1 is the Parked item, not the "M1 unpark unit", the copyLast chain fix shipped in 1.5.1.)
 
 ### M2 -- `forEachNewest(fn)` (newest-first walk)
 
