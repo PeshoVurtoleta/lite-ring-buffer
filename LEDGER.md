@@ -52,7 +52,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, C15, D7, B10)*
+   C8, C10, C11, C15, C17, D7, B10)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
    passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15)*
@@ -62,7 +62,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
    lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
-   derived from another measurement is not a measurement. *(A11, B4, C9, D4)*
+   derived from another measurement is not a measurement. *(A11, B4, C9, D4, D16)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim about allocation is a claim about every caller path.** "Zero allocation" holds only
@@ -449,6 +449,29 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (Q-R3-PARGAP A) stands until that A/B passes. Reopen ORD_A / BRAND only if exact 1.5.0 parity on hooked or
   re-prototyped dsts is waived; a carrier with no module state only with a hot byte payback that keeps the chain
   <= 766 B.
+  M1 unpark addition (2026-11-15, `.handoff/M1/unpark/`, plan `.handoff/M1/PLAN-delta-unpark.md`; before build c2910c0 /
+  9765c21e): the unpark condition of the SLIM2 build unit is met. M1-slim2 restored, candidate C's 3 hunks applied
+  (5a2e12e1, identical to GLB_O_MIN2), then JSDoc only (9e70b525, stripped identity to 5a2e12e1; frozen
+  `.handoff/M1/frozen/RingBuffer.unpark-9e70b525.js`). Chain copyLast 295 + lastCheck 278 + rotCopy 192 = 765 B
+  (<= 766), copyTo chain 737 B unchanged; parity-m2 matrix 367,806 / 0 and stage H 31,464 / 0 (parked 0083e04b control
+  18,306 mismatching rows; SLIM2 and the off-by-one twin caught). Gates: test/chainsize.test.js (+ an M1-N1 row, red under
+  mutant m13), test/copylast-hooks.test.js (4, the stage-H port of Q-M2-TEST A; red on 0083e04b, ME and MA; replaces
+  the parked build's hasInstance-count test, never committed), test/qa-m1.test.js (4, qa; C17); npm test 294/294. Review APPROVED (overlay
+  `.handoff/M1/unpark/review/r1/`, 0 blockers, 3 nits). qa PASS: 756 probe rows equal to 1.5.0
+  (`.handoff/M1/unpark/qa/probe.mjs`). Strict A/B (`npm run bench:copylast`, cand 9e70b525 vs ref 9765c21e, Apple M4
+  Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations = 63 paired rounds per row, every timed column
+  0.00 B/op), two runs, each `quiet-lock run --strict` exit 0, host QUIET, baseline 2.21: strict-1
+  (`.handoff/M1/ab/strict-1/`, 2026-11-15T05:55Z, load1 1.09 -> 1.66): Float32 1024 copyLast(count) / copyTo h0
+  1.016 [0.973..1.043], h768 1.017 [1.009..1.174], h768 compilation medians 1.016 / 1.181 / 1.007; strict-2
+  (`.handoff/M1/ab/strict-2/`, 2026-11-15T06:08Z, load1 2.20 -> 1.73): h0 1.009 [0.964..1.019], h768 1.007
+  [0.999..1.030], every Float32 compilation median <= 1.046; Float64 h768 one compilation 1.193 (row median 1.00; D16).
+  1.5.0 read 1.17 (h0) / 1.52 (h768) on the strict host (above). Caller rows (lower of the two runs, minimum over both
+  heads): n 120 2.1x (Float32) / 2.2x (Float64), n 512 1.5x / 1.2x faster than the caller workaround.
+  RULING (M1 unpark): Q-M1-STRICT = "A Pass on medians" (maintainer, 2026-11-15, AskUserQuestion in the main session,
+  after strict-1 drew "C One more strict run" and strict-2 ran): the waiver Q-R3-PARGAP A is LIFTED; 1.5.1 ships C
+  (fd7af97); docs cite both runs, each claim the lower of the two, with the one slow compilation per run stated.
+  Reopen (law 13): copyLast(count) / copyTo above 1.05 on the median of a strict run at h0 or h768 on the pinned engine,
+  or test/chainsize.test.js red on it (the chain margin is 1 B).
 
 ---
 
@@ -956,6 +979,26 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `test/copylast.test.js`, the check-order test (message order). Reopens if a check is added to
   `lastCheck` with no test that fails when its position is mutated.
 
+### C17. The shipped suite passed a same-size reorder that reads the ring's count before the checks (M1 unpark qa)
+
+- **What happened.** In the M1 unpark qa pass, mutant MK_countEarly (9e70b525 with `let k = rb.count;` moved above the
+  type / n / bounds check; chain still 765 B, so test/chainsize.test.js cannot see it) passed every other shipped test
+  file (`.handoff/M1/unpark/qa/logs/suite-MK_countEarly.log`, 285 pass / 0 fail; `test/tools/chain-size.mjs` on MK: 765,
+  ok). 1.5.0 reads `rb.count` after `dst instanceof
+  DataView`, so a user `DataView[Symbol.hasInstance]` hook that resets, destroys or pushes into the ring during the
+  check changes what the call copies; MK copies the stale count. Mutant MM_lenBeforeHook (dst's length read before the
+  hook runs) is the same class for a resizable / transferred `dst` buffer.
+- **Root cause.** The stage-H port (test/copylast-hooks.test.js) compares which error is thrown and the hook event
+  sequence; no row lets the hook mutate the ring or `dst`'s buffer, so read-order changes that keep the error
+  identical were unpinned (law 1).
+- **Fix.** test/qa-m1.test.js (4, expectations are literals from the frozen 1.5.0 build a771a79): Q1-Q3 hook resets /
+  destroys / pushes into the ring mid-check, Q4 hook resizes / transfers a resizable dst buffer mid-check.
+- **Evidence.** `.handoff/M1/unpark/qa/` (`mut/MK_countEarly.js`, `mut/MM_lenBeforeHook.js`, `ov-MK_countEarly/`,
+  `ov-MM_lenBeforeHook/`, `logs/`), 2026-11-15, Node v26.8.2; header of `test/qa-m1.test.js`; fd7af97.
+- **Law.** 1.
+- **Gate.** `test/qa-m1.test.js` Q1-Q4 (revert checks: Q1-Q3 red on MK_countEarly, Q4 red on MM_lenBeforeHook). Reopens
+  if copyLast / copyLastFast gain a read of ring or dst state with no row whose hook mutates that state.
+
 ---
 
 ## D. Measurement traps
@@ -1202,3 +1245,23 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `parity-m2.mjs` NS_H / OFFS_H include 0, -0 (and -0 offset); Q-M2-TEST A ports those rows and the O3
   re-entry outcome rows into `npm test` with revert checks on mutants ME and MA. A research oracle for a variant adds
   rows at each new branch condition the variant introduces, and re-entrancy rows for any state that outlives a call.
+
+### D16. One of three compilations can read ~1.18-1.19 on a row with no gap (M1 unpark strict A/B)
+
+- **What happened.** Both strict runs of the M1 unpark A/B (cand 9e70b525 vs ref 9765c21e, each `quiet-lock run
+  --strict` exit 0, host QUIET) had exactly one slow compilation, on a different row each time: strict-1 Float32 1024
+  h768 compilation medians 1.016 / 1.181 / 1.007 (row median 1.017, Q3 1.174); strict-2 Float64 1024 h768 1.193 /
+  1.001 / 1.001 (row median 1.00, Q3 1.19), a row that showed no gap in 1.5.0 either. strict-2's Float32 h768 row read
+  1.046 / 1.010 / 0.998. A rule on "every compilation median <= 1.05" of one run would have failed strict-1 on the
+  row the fix targets and strict-2 on a row it does not target (Float64, no gap in 1.5.0; the trimmed lastCheck runs on it too); those two rows' medians are <= 1.017 in both runs (every row median of both runs <= 1.02).
+- **Root cause.** A compilation is one process with its own tier-up order and inlining decisions (A15: the frozen
+  build's inlining result depends on tier-up order); 21 rounds share that one outcome, so a per-compilation median is a
+  sample of size 1 of the compilation outcome, not of the timing. Not traced which decision differed in the slow
+  compilation.
+- **Evidence.** `.handoff/M1/ab/strict-1/ab.json`, `.handoff/M1/ab/strict-2/ab.json` (2026-11-15T05:55Z / 06:08Z,
+  Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, load1 1.09 -> 1.66 / 2.20 -> 1.73 vs baseline 2.21, K 21 x 3
+  compilations); RULING Q-M1-STRICT A (A15).
+- **Law.** 5 (a measured number enters docs from this cycle's run logs: here, both runs).
+- **Gate.** None (STATISTICAL, by hand). A strict A/B verdict is ruled on row medians; every run is recorded, and docs
+  cite each run with any slow compilation stated, each claim the lower of the runs. Reopen if a later strict run shows a
+  slow compilation on the same row in two runs in a row (then it is a mode, not noise: trace it).

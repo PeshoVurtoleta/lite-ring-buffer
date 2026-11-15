@@ -340,7 +340,7 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 
 ## Testing
 
-The dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_bytes`). The runtime `engines` field stays `>=18`.
+`npm test` needs exactly the pinned engine, Node v26.8.2 / V8 14.6.202.34-node.28: `test/chainsize.test.js` fails closed on any other Node, so `npm run verify` does too. The other dev scripts need Node >= 24 (`test/alloc.mjs` reads V8's `total_allocated_bytes`). The runtime `engines` field stays `>=18`.
 
 | Script | What it runs |
 | --- | --- |

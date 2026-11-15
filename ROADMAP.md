@@ -4,8 +4,8 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
-Baseline: 1.5.0 (prepared 2026-11-15: R3 `copyLast` / `copyLastFast` + the e3c1d42 `pushBatch` doc fixes over 1.4.0; R3 bb0459b,
-qa 2026-11-15). 1.4.0 was prepared 2026-11-14 (R2 `pushBatch` + LU2 over 1.3.0; LU2 d68b2fd, bench eef921f, R2 f03561c). 1.3.0 was
+Baseline: 1.5.1 (prepared 2026-11-15: M1, the copyLast chain trim fd7af97, over 1.5.0; R3 below). 1.5.0 was prepared 2026-11-15
+(R3 `copyLast` / `copyLastFast` + the e3c1d42 `pushBatch` doc fixes over 1.4.0; R3 bb0459b, qa 2026-11-15). 1.4.0 was prepared 2026-11-14 (R2 `pushBatch` + LU2 over 1.3.0; LU2 d68b2fd, bench eef921f, R2 f03561c). 1.3.0 was
 prepared 2026-11-12 (R1 over 1.2.1). 1.2.1 (`27a8326`) was tooling + docs only (units D / D2,
 LEDGER.md); 1.2.0 (`0412025`) shipped the `e3e1df1` audit fixes and the alloc gate. R1 shipped in 1.3.0 (99e8749, bench 5ae2266, R1b fix 7b0f74b, audit fix f66972c / 114af66, qa abc31af): `copyTo`
 allocates 0 B at every size while each of its three store sites has seen at most 4 `dst` hidden classes (LEDGER B8) and keeps the nominal 32-sample scalar cutoff (`RingBuffer.js` `COPY_LOOP_MAX`, back
@@ -194,6 +194,11 @@ R3-M2 RULED 2026-11-15 (`.handoff/PROPOSAL-r3-m2.md`): Q-M2-ADOPT = "A Unpark wi
 parity 0 incl. 31,464 stage-H hook rows, suite 281/281); Q-M2-O3 = "A Out of contract, documented"; Q-M2-TEST =
 "A Port stage H to npm test". Next: the unpark unit (restore M1-slim2, apply C, re-review, strict A/B, docs, qa,
 1.5.1). The waiver (Q-R3-PARGAP A) stands until the strict A/B passes (LEDGER A15 R3-M2 addition, D15).
+M1 BUILT 2026-11-15 (fd7af97 / 9e70b525; review APPROVED, qa PASS; npm test 281 -> 294): candidate C, chain 765 B,
+copyTo chain 737 B unchanged, every error unchanged from 1.5.0. Strict A/B two runs, both exit 0 QUIET; RULING
+Q-M1-STRICT = "A Pass on medians" (maintainer, 2026-11-15): the waiver (Q-R3-PARGAP A) is LIFTED; Float32 1024
+copyLast(count) / copyTo 1.01-1.02 on the medians (1.5.0: 1.17 / 1.52). Shipped in 1.5.1 (LEDGER A15 "M1 unpark
+addition", C17, D16).
 
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.
