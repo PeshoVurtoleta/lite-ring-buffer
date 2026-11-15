@@ -189,6 +189,11 @@ SLIM2 BUILD PARKED 2026-11-15 (`.handoff/M1/`, review APPROVED, then RULING Q-M1
 on a failing call the double `dst instanceof DataView` lets a stateful user hasInstance hook or a Proxy prototype trap
 change which error is thrown. Parked as `.handoff/rejected/M1-slim2/`. Next: a research pass for a cold path that
 observes DataView-ness once with the chain <= 766 B (LEDGER A15 SLIM2 build unit, D14). The waiver (Q-R3-PARGAP A) stands.
+R3-M2 RULED 2026-11-15 (`.handoff/PROPOSAL-r3-m2.md`): Q-M2-ADOPT = "A Unpark with C" (candidate GLB_O_MIN2
+5a2e12e1: new hot check order, the hot `instanceof` answer carried in a module `var`, min rewritten; chain 765 B,
+parity 0 incl. 31,464 stage-H hook rows, suite 281/281); Q-M2-O3 = "A Out of contract, documented"; Q-M2-TEST =
+"A Port stage H to npm test". Next: the unpark unit (restore M1-slim2, apply C, re-review, strict A/B, docs, qa,
+1.5.1). The waiver (Q-R3-PARGAP A) stands until the strict A/B passes (LEDGER A15 R3-M2 addition, D15).
 
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.

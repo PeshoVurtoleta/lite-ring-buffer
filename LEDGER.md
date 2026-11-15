@@ -419,6 +419,36 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   result, or tests a brand the user cannot hook) with the chain still <= 766 B on the pinned V8, the same parity gate
   at 0 mismatches incl. stateful-hook and Proxy-prototype rows, then the strict A/B (Q-M1-STRICT A). The waiver
   (Q-R3-PARGAP A) stands.
+  R3-M2 addition (2026-11-15, research pass `.handoff/research/r3-m2/`, HEAD c2910c0 / 9765c21e, no source edit;
+  variants from the parked 0083e04b; every figure DETERMINISTIC unless REPORTED): one DataView observation per call
+  FITS. Refused, with the run that killed each: ORD_A (hot order isView, n, dstOffset, instanceof, bounds; the cold
+  builder infers the hot answer by brand + bounds; 765 B) mismatches 1.5.0 on 294 stage-H rows -- a TypedArray that
+  answers `instanceof DataView` true AND is out of bounds gets the bounds RangeError, not dstTypeError; ORD_B
+  (re-asks there) makes 2 observations on such a call (786 rows); BRAND (TA_TAG brand + one getPrototypeOf step,
+  765 B) cannot see the chain `instanceof` walks (4,686 rows: DV subclass, re-prototyped TypedArray, liar hooks);
+  every exact carrier without a byte payback is over 766 B (local `var` 769, `let` 771, module `var` 767, module
+  `let` 774); module `var` + min payback on SLIM2's order (GLB_S_MIN, 765 B) and on the new order with a late flag
+  read (GLB_O_MIN, 765 B) throw the wrong error when a replaced, re-entrant `Number.isInteger` overwrites the flag
+  (7 / 30 and 6 / 30 rows, `reentry.mjs`). Kept: candidate C = GLB_O_MIN2 5a2e12e1 -- the new hot order with
+  `(lastDv = dst instanceof DataView)` into a module-scope `var` (2 B), the cold builder reading `lastDv` first and
+  asking `instanceof` itself only when the hot body did not (bad n / dstOffset), and lastCheck's min rewritten as
+  `let k = rb.count; if (n < k) k = n;` (-2 B; the nominal estimate was -4): lastCheck 278 B, chain 765 B. Oracle
+  `research/r3-m2/parity-m2.mjs` (the M1 gate + stage H: 6 hasInstance hooks x 19 dsts incl. Proxy prototypes, event
+  sequence vs 1.5.0): matrix 367,806 / 0, stage H 31,464 / 0 (A/A 0, 23,460 hook rows, max 1 call per row; parked
+  0083e04b control 18,306); overlay `npm test` 281/281; reentry O1 0 / 30, O3 0 / 30 outcome differences;
+  `--trace-turbo-inlining` (REPORTED, load1 3.81): copyLast inlines into its driver 3 / 3 (frozen 0 / 3). Mutants of C:
+  MB / MC / MF / ME caught by stage H, MD equivalent, MA (late flag read) caught only by the O3 re-entry rows. Not
+  measured: speed (the hot body now writes a module context slot per call). Evidence: `.handoff/research/r3-m2/
+  PROGRESS.md` rungs 0-4 + claim review, `runs/`, `review/`; `.handoff/PROPOSAL-r3-m2.md` (2 claim-review rounds,
+  both LITERAL, fixed). Node v26.8.2 / V8 14.6.202.34-node.28, Apple M4 Pro, 2026-11-15.
+  RULING (R3-M2): Q-M2-ADOPT = "A Unpark with C"; Q-M2-O3 = "A Out of contract, documented" (replaced builtins /
+  `Function.prototype.call` unsupported; docs state the call-time globals and the new check order); Q-M2-TEST = "A
+  Port stage H to npm test" (incl. n 0 / -0 rows and the O3 re-entry outcome rows; revert checks on 0083e04b, MA, ME).
+  Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3-m2.md` section 7). Unpark unit (next
+  burst): restore M1-slim2, apply C's delta, re-review, then the strict A/B (Q-M1-STRICT A); the waiver
+  (Q-R3-PARGAP A) stands until that A/B passes. Reopen ORD_A / BRAND only if exact 1.5.0 parity on hooked or
+  re-prototyped dsts is waived; a carrier with no module state only with a hot byte payback that keeps the chain
+  <= 766 B.
 
 ---
 
@@ -1154,3 +1184,21 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `.handoff/M1/gate/parity.mjs` (unit gate; parked with M1) has poisoned-cache, storage and frozen-ring rows and
   uses SLIM2 as a must-fail control. A research variant that claims behaviour parity also runs the full shipped suite in
   an overlay before the claim is made.
+
+### D15. A stage-H oracle missed the candidate's own decision boundary, and a stateless oracle missed shared state (R3-M2)
+
+- **What happened.** (1) The first stage H (19,836 rows) had n {2, -1, 1.5, NaN, '1', 100, undefined} and dstOffset
+  {0, -1, NaN, 5}: no n 0 / -0 and no dstOffset -0, exactly where candidate C's cold builder decides whether the hot
+  body asked `instanceof` (`n >= 0`). The claim review's mutant ME (`n > 0`) passed the full oracle while calling the
+  hook twice on `copyLast(f32 of 3, 5, 0)` (and throwing dstTypeError under a flip hook). (2) GLB_S_MIN and GLB_O_MIN
+  passed stage H at 0 mismatches although they keep the hot `instanceof` answer in module state: only the separate
+  `reentry.mjs` probe, where a replaced `Number.isInteger` re-enters copyLast, showed them throwing the wrong error.
+- **Root cause.** (1) The row lists were copied from the shapes 1.5.0's checks care about, not from the variant's own
+  new branch conditions. (2) Each stage-H row is one call with fresh state; a design with cross-call state needs rows
+  that interleave calls inside the window where that state is live.
+- **Evidence.** `.handoff/research/r3-m2/review/` (mutants, `parity-m2-n0.mjs`, `probe-n0.mjs`), `runs/h-only-ME-n0.json`
+  (1,224 mismatches after the fix), `runs/reentry.json`; PROPOSAL-r3-m2 section 7 (2026-11-15, Node v26.8.2).
+- **Law.** 1 (a control must fire on the variant's own boundary), 2.
+- **Gate.** `parity-m2.mjs` NS_H / OFFS_H include 0, -0 (and -0 offset); Q-M2-TEST A ports those rows and the O3
+  re-entry outcome rows into `npm test` with revert checks on mutants ME and MA. A research oracle for a variant adds
+  rows at each new branch condition the variant introduces, and re-entrancy rows for any state that outlives a call.
