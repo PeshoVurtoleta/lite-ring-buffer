@@ -10,6 +10,8 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-15
+
 ### Docs
 
 - README / llms.txt integer-precision note gains the monotonic energy-counter example (Wh totals belong in the caller's Float64 columns).
