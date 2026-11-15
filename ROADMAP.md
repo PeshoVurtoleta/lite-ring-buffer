@@ -295,6 +295,35 @@ Sketch for that PROPOSAL (NOT ruled): ring r lives at `data[r * capacity .. (r +
 - Q-B3: do lite-canvas-graph / lite-stats-math take (bank, r) directly, or only a copied window?
 Gate: parity with N independent `RingBuffer`s under a random interleaved push stream, alloc lanes, torture.
 
+Ping 2026-11-16 (maintainer, from the ShellyProject research thread): NOT NOW. R4 stays Parked; revisit when
+pulse-core v0 exists (ShellyProject week 3). Why:
+- The unpark rule above is unmet: no ShellyProject doc names RingBank.
+- A memory probe by that thread (10,000 rings, REPORTED there; provenance not recorded here) found 10,000
+  RingBuffers vs one flat bank at 5.85 vs 2.64 MB (64 samples), 13.5 vs 10.3 MB (256), 44.2 vs 41.0 MB (1024): a
+  constant ~329 B of heap per ring, ~3.3 MB once at startup; steady state 0 B per sample either way.
+- 10,000 devices x 10 Hz = 100,000 pushes / s (nominal arithmetic, untimed): no throughput case.
+- ShellyProject weeks 0-2 do not touch per-device history. Week 3 writes it as a plain pulse-core column (one
+  `Float32Array(N * K)` + an `Int32Array` of heads, indexed by arena slot).
+New unpark trigger: that column needs zero-allocation window copies in several places, or must feed
+lite-canvas-graph / lite-stats-math directly. Then the research burst above.
+
+Design notes for that research burst (two external sketches, 2026-11-16; orchestrator assessment, NOT ruled):
+- Agreed: uniform capacity (Q-B1 yes); copies only in v1 (Q-B2); companions read a copied window (Q-B3); one
+  buffer identity makes the alias / storage checks simpler (`length === rings * capacity`); rings share one
+  lifetime (`reset(r)`, `destroy()` of the whole bank; independent lifetimes = N RingBuffers); `pushBatch` keeps an
+  intrinsic `set` (its offset argument is the destination offset).
+- Every method validates `r`: an out-of-range or fractional `r` reads `undefined` from the Int32Arrays and the
+  store is silently dropped (fail-open).
+- Correction: both sketches say the zero-alloc `copyTo` "must" be the two-span loop. A masked loop
+  (`data[base + ((start + i) & mask)]`) is zero-alloc too, and M1 measured the two-span walk 1.55x SLOWER on a
+  wrapped full ring (LEDGER A7 / D17). It is an A/B, masked loop first.
+- A cost the sketches skip: a bank ring cannot use `rotCopy` (one `set` of the WHOLE storage), so a full-ring
+  `copyTo` falls back to a scalar loop. B1 at n 1024: RingBuffer 277 ns vs a hand-rolled loop 390 ns (REPORTED,
+  2026-11-15 strict run).
+- Counter width: cap the bank total (`rings * capacity <= 2^30`, 4 GiB of samples) so `head`, `count` and
+  `base + h` stay int32 / Smi; no Uint32Array needed.
+- `r * capacity` vs a bases column vs `r << log2(capacity)`: an A/B, not a guess.
+
 ### M1 -- two-span `forEach` (and the `copyTo` loop) -- DROPPED 2026-11-15
 
 Splitting the oldest-first walk into its two contiguous halves drops the `& mask` per element; that V8 then

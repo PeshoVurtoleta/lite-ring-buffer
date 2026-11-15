@@ -752,7 +752,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   resolves at call time (out of contract if replaced); the three existing lists now name every builtin the checks
   consult and point to the note for the full set.
 - **Evidence.** `.handoff/HISTORY.md` (post-1.5.3 FILLERS NEXT, DESIGN follow-up); frozen source
-  `.handoff/frozen/f0c691a/RingBuffer.js`; build 414bba0d (working tree on f0c691a).
+  `.handoff/archive/1.5.5/frozen/f0c691a/RingBuffer.js`; build 414bba0d (working tree on f0c691a).
   The probes have no committed log, so this entry quotes no measurement.
 - **Law.** 7 (generalized by this entry, maintainer ruling 2026-11-15: generalize law 7).
 - **Gate.** None (doc text; reviewer).
