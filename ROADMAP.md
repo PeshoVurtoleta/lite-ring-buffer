@@ -183,7 +183,12 @@ the strict A/B (`npm run bench:copylast`) exit 0 (see LEDGER A15).
 MECHANISM FOUND 2026-11-15 (FILLER R3-M1, research ladder `.handoff/research/r3-m1/`, PRELIMINARY; LEDGER A15 "R3-M1
 addition", D13): the copyLast(count) gap is the caller's cumulative-inlining budget (copyLast's inlined chain 791 B is
 over 920 / 1.2, copyTo's 737 B is not), not either body. A trimmed lastCheck (SLIM2, chain 765 B) inlines and ties copyTo;
-`.handoff/PROPOSAL-r3-m1.md` (Q-M1-ADOPT / GATE / STRICT) is NOT RULED -- the waiver (Q-R3-PARGAP A) stands until it is.
+`.handoff/PROPOSAL-r3-m1.md` RULED 2026-11-15 (maintainer, AskUserQuestion, one sitting; PROPOSAL section 6):
+Q-M1-ADOPT = "A Build SLIM2"; Q-M1-GATE = "A Chain-size gate in npm test"; Q-M1-STRICT = "A In the build unit".
+SLIM2 BUILD PARKED 2026-11-15 (`.handoff/M1/`, review APPROVED, then RULING Q-M1-HOOK = "B Park, research first"):
+on a failing call the double `dst instanceof DataView` lets a stateful user hasInstance hook or a Proxy prototype trap
+change which error is thrown. Parked as `.handoff/rejected/M1-slim2/`. Next: a research pass for a cold path that
+observes DataView-ness once with the chain <= 766 B (LEDGER A15 SLIM2 build unit, D14). The waiver (Q-R3-PARGAP A) stands.
 
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.

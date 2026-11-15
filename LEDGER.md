@@ -399,6 +399,26 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   copyLast(count) / copyTo <= 1.05 at h0 and h768, behaviour parity, and a gate on the chain size (its margin is < 2 B
   and depends on V8's bytecode sizes and budget constants, and on the caller: a caller with no budget left inlines
   neither method).
+  RULING (R3-M1): Q-M1-ADOPT = "A Build SLIM2"; Q-M1-GATE = "A Chain-size gate in npm test"; Q-M1-STRICT = "A In the
+  build unit". Maintainer, 2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3-m1.md` section 6).
+  SLIM2 build unit (2026-11-15, `.handoff/M1/`, before build a771a79 / 9765c21e): PARKED after review APPROVED. The
+  candidate (0083e04b) took SLIM2's hot body token for token (lastCheck 278 B, chain 765 B, copyTo chain 737 B unchanged;
+  every other function byte-identical) with one SPEC change: lastStateError compares the same `buf` the hot body compared
+  (`data === rb._bufOf ? rb._buf : TA_BUFFER(data)`), because SLIM2's re-read broke the shipped poisoned-cache test
+  (D14). Gates built: `test/chainsize.test.js` + `test/tools/chain-size.mjs` (chain <= 766 on the pinned Node v26.8.2
+  / V8 14.6.202.34-node.28; frozen 791 fails, padded 794 fails, 13 of 14 reviewer mutants caught), a hasInstance-count
+  test (1 call passing, 2 failing; red on 9765c21e), the unit parity gate `.handoff/M1/gate/parity.mjs` (367,806 cases,
+  0 mismatches, controls SLIM2 + an off-by-one twin caught), npm test 288/288; `--trace-turbo-inlining` (REPORTED,
+  PRELIMINARY host): copyLast inlines into the driver on 0083e04b (2 lines), not on 9765c21e (0 in 3 repeats; the
+  frozen result depends on tier-up order). The review found that the double `dst instanceof DataView` on a failing call
+  is more than "two calls": a user `DataView[Symbol.hasInstance]` that answers differently or throws on the second call,
+  or a Proxy getPrototypeOf trap in dst's prototype chain, changes WHICH error is thrown vs 1.5.0 (reviewer probe:
+  TypeError or the hook's own error where 1.5.0 throws the n RangeError). RULING Q-M1-HOOK = "B Park, research first"
+  (maintainer, 2026-11-15, AskUserQuestion). Parked as `.handoff/rejected/M1-slim2/` (park-rejected.mjs, base = HEAD
+  a771a79). Unpark (law 13): a cold path that observes `dst`'s DataView-ness at most once per call (reuses the hot
+  result, or tests a brand the user cannot hook) with the chain still <= 766 B on the pinned V8, the same parity gate
+  at 0 mismatches incl. stateful-hook and Proxy-prototype rows, then the strict A/B (Q-M1-STRICT A). The waiver
+  (Q-R3-PARGAP A) stands.
 
 ---
 
@@ -1118,3 +1138,19 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** None (research). A speed comparison between two methods records `--trace-turbo-inlining` for each driver
   and reports the cumulative chain size of each side first; an ablation tests code cost only if both sides stay on the
   same side of the reserve.
+
+### D14. A research variant was called behaviour-equal on a matrix that never ran the shipped suite (R3-M1 -> M1)
+
+- **What happened.** R3-M1 rung 3a reported SLIM2 (e20476df) as matching 1.5.0 on 260,580 cases (`check.mjs`), with the
+  storage, cache-hit and frozen-ring paths listed as not covered. The M1 planner read the shipped tests against SLIM2's
+  `lastStateError` and found that it re-reads `data`'s buffer instead of using the `buf` the hot body compared, so on a
+  cache hit with a poisoned `_buf` it throws the storage RangeError where 1.5.0 throws the alias RangeError. Running
+  test/copylast.test.js on SLIM2 in an overlay confirmed it: 18 / 19 pass, the poisoned-cache test (lines 419-431) fails.
+- **Root cause.** A research behaviour matrix covers only the rows it generates; the shipped suite already pinned the
+  uncovered path, and nobody ran it on the variant. The claim review checked the matrix, not the suite.
+- **Evidence.** `.handoff/M1/evidence/t0/c-overlay-copylast.log` (overlay of SLIM2 e20476df, 2026-11-15, Node v26.8.2);
+  `.handoff/M1/PLAN.md` SPEC; `.handoff/research/r3-m1/PROGRESS.md` rung 3a (the uncovered-path note).
+- **Law.** 1, 2 (an unverified path is not "equal").
+- **Gate.** `.handoff/M1/gate/parity.mjs` (unit gate; parked with M1) has poisoned-cache, storage and frozen-ring rows and
+  uses SLIM2 as a must-fail control. A research variant that claims behaviour parity also runs the full shipped suite in
+  an overlay before the claim is made.
