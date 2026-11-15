@@ -414,7 +414,7 @@ Because wrap-around is then `head & mask`, one AND, and the comparison section a
 Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` into a Float32Array is a same-type copy with no conversion.
 
 **Can I push integers?**
-Yes -- they'll be implicitly converted to float32 on store, and read back losslessly for any integer with `|x| <= 2^24`. Larger integers will be rounded (a monotonic energy counter in Wh crosses 2^24 = 16,777,216 and silently loses precision: keep Wh totals in your own Float64 columns, not in this ring); for u32 telemetry use a u32-backed sibling library or pack into the 24-bit mantissa.
+Yes -- they'll be implicitly converted to float32 on store, and read back losslessly for any integer with `|x| <= 2^24`. Larger integers will be rounded (a monotonic energy counter in Wh crosses 2^24 = 16,777,216 and silently loses precision: keep Wh totals in your own Float64 columns, not in this ring); for full-range u32 telemetry keep a `Uint32Array` ring of your own, or store only integers with `|x| <= 2^24` (a value already bounded that way, or a per-sample delta with `|delta| <= 2^24`, keeping the running total outside the ring).
 
 **Why is `tryPush` slower than `push` in microbenchmarks?**
 It branches on the `options` argument and the full state. For most callers `push` is the right choice; reach for `tryPush` only when discarding samples on overflow is a *correctness* requirement (e.g. lossy network ingest).

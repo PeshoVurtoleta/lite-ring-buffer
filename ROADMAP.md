@@ -4,7 +4,8 @@ Hard lessons and refusals: LEDGER.md. Planner, research and audit briefs quote i
 
 Statistical host: local QUIET window, strict (Q-STATHOST ruled 2026-11-11, R1 step 1): the copyTo A/B runs under `quiet-lock run --strict` (the promoted probe first gains a one-16-B-box-per-call must-fail column) on the R1 candidate and on each release touching `copyTo`; NOISY / BUSY = PENDING. Until the build unit promotes the probe into the repo, statistical claims are REPORTED only.
 
-Baseline: 1.5.4 (prepared 2026-11-15: docs patch, the post-1.5.3 fillers 0d6ef59, over 1.5.3). 1.5.3 was prepared 2026-11-15
+Baseline: 1.5.5 (prepared 2026-11-15: docs patch, the post-1.5.4 fillers 68b45ce + Track Q3, over 1.5.4). 1.5.4 was prepared
+2026-11-15 (docs patch, the post-1.5.3 fillers 0d6ef59, over 1.5.3). 1.5.3 was prepared 2026-11-15
 (docs + dev bench patch, B1 acce045 and the M1 drop 6431ec9, over 1.5.2). 1.5.2 was prepared 2026-11-15
 (docs patch, the post-1.5.1 housekeeping cb36977, over 1.5.1). 1.5.1 was prepared 2026-11-15
 (M1, the copyLast chain trim fd7af97, over 1.5.0; R3 below). 1.5.0 was prepared 2026-11-15
@@ -230,6 +231,46 @@ Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12)
 The M1 research burst closed 2026-11-15 (M1 dropped, see Parked).
 STATUS 2026-11-15: done, committed acce045 (unit B1: bench + strict run + docs), released in 1.5.3. `npm run bench:compare` (dev-only, REPORTED); one strict QUIET run, every row VALID, evidence `.handoff/archive/1.5.3/B1/strict-1/compare.md`. The README "3-5x" claim is replaced by the measured figures and the README has the comparison table (LEDGER B12 / C18).
 
+## Track Q -- queued 2026-11-15 from an external review (maintainer: "Yes, add"; order and Q-ids still to rule)
+
+### Q1 -- CI (tooling; no runtime change)
+- A pinned job: `npm run verify` on Node v26.8.2, macos-arm64 (the host of record), so the fail-closed chain-size
+  gate keeps its meaning (Q-M1-GATE A unchanged).
+- A portable core lane on the LTS matrix: the behavioural test files only (no engine pin, no bash / git tools).
+- `engines: >=18` is a claim nothing tests today (`npm test` needs exactly v26.8.2, the dev scripts need >= 24, and
+  Node 18 is end-of-life): either the core lane covers 18 / 20 / 22, or `engines` is raised.
+- Design reference: the lite-fastbit32 nightly-CI program (see Track R R1, `PLAN-nightly-ci.md`). STATISTICAL claims
+  stay out of CI gates. Maintainer rulings needed: workflow layout (likely a suite pattern), the `engines` floor,
+  and whether a types check (`tsc --noEmit` on `RingBuffer.d.ts`, devDependency only) joins the core lane.
+
+### Q2 -- B2: extend the comparison bench (REPORTED only; one strict run)
+- A "checked" hand-rolled Float32Array column with the same argument checks as RingBuffer, so B1's `getOrDefault`
+  0.59x and `copyTo` n 32 0.52x gaps split into validation cost vs loop cost (today: no cause measured).
+- A mnemonist `CircularBuffer(Float32Array, n)` column (the closest real competitor), pinned by version + sha256 like
+  lite-o1; devDependency needs a maintainer ruling. Each library used through its own best API.
+- A cross-library GC lane (minor / major counts, retained bytes; lite-gc-profiler + lite-leak) and a
+  memory-per-window table: the zero-GC read path vs allocating `toArray` is where this package differs.
+- Reuse `test/bench/compare.mjs` (A/A, SLOW / BOX controls, oracle + mutants, per-compilation medians); LEDGER D17.
+
+### Q3 -- README FAQ "u32-backed sibling library" (docs; rides the next patch)
+The FAQ answer on integers points to a u32-backed sibling library; the suite catalog has none (checked 2026-11-15).
+Reword: pack into the 24-bit mantissa, or keep a Uint32Array ring of your own.
+STATUS 2026-11-15: done (working tree), rides 1.5.5; the mantissa-packing advice was dropped (a full-range u32 cannot pack losslessly).
+
+### Considered from the same review, not queued (orchestrator assessment 2026-11-15; the maintainer may reopen)
+- `toJSON()`: fixes the documented double serialization of `_bufOf` / `_buf` without touching the cache, but it is
+  new public surface: research burst first, if wanted.
+- `toArray()` / `RingBuffer.from()`: two lines each with `copyTo` / `pushBatch`; migration convenience that does not
+  serve the Positioning rule. A README migration cheat-sheet covers it.
+- Two-span store loop for `copyTo`: the review read README's 3.03x / 3.85x (1024 f32 wrap / part) as "vs
+  copyToFast"; they are "now vs 1.2.1". The wrapped full ring already uses `set` + `copyWithin`; M1 measured a
+  two-span walk 1.55x slower (LEDGER A7 / D17); B1 has `copyTo` n 1024 ahead of a hand-rolled ring (277 vs 390 ns).
+- p95 / p99 per op: at 1-25 ns per op the timer cannot resolve per-op tails; tails come from GC and deopts, gated by
+  counts.
+- x86 / browser replication: valid but costly; the 0 B claims are already labelled Node v26.8.2 arm64. A browser
+  smoke lane is the cheapest useful form, if ever.
+- `requestedCapacity` after `destroy()`: Settled (use after destroy is misuse; do not reopen).
+
 ## Docs-only fillers
 
 - README Ecosystem line: DONE in 1.2.0 (0412025), R1 step 3; the README states the 104 / 208 B per frame; R1 (99e8749) made that line state 0 B (docs batch B4).
@@ -296,6 +337,41 @@ one on a full wrapped ring), re-measured by the same strict A/B (interleaved, K 
 
 Small and additive, but no consumer needs it: EMA and decay weights can be computed oldest-first. Unpark only
 when a consumer (lite-canvas-graph trails) asks for it.
+
+### R5 -- monotonic write counter + "since my last read" (LEAD, not a plan; added 2026-11-15)
+Idea: count every push in a field that only grows (`written`), so a reader that polls slower than the writer (UI at
+60 Hz, ingest at 1 kHz) can ask what is new since its last read (`copyLast(dst, off, written - seen)`, or a
+`copySince`) and detect an overrun (`written - seen > capacity`). Today the caller counts pushes itself. Prior art:
+the free-running positions of rtrb / ringbuf (Rust); an external review (2026-11-15) asked for the same gap detection.
+- Cost: one more field store in `push` (at parity with a hand-rolled ring today, 1.01 vs 1.01 ns, B1) and `pushBatch`.
+  Needs an interleaved A/B on `push` and the chain-size gate re-checked.
+- Trap: V8's Smi range. A counter that grows forever leaves it at 2^31 - 1 (2^30 - 1 under pointer compression):
+  ~24.9 days at 1 kHz, ~12.4 h at 48 kHz. The field then changes representation (Smi -> Double): a map change and a
+  deopt of every inlined caller, weeks into a long-running process. Options to research: an int32-wrapping counter
+  (`(w + 1) | 0`, gap `(w - r) | 0`, correct while a reader polls within 2^31 pushes) or a Double field from birth.
+  Either needs a torture lane that crosses the wrap (seed the counter near the edge).
+- Unpark: only if ShellyProject (or a dependent) names a reader slower than its writer. Research burst first (new
+  public surface).
+
+### X1 -- `lite-spsc-ring` prior art (a separate package, not this one; LEAD, added 2026-11-15)
+See Rejected "worker mode". Prior art read 2026-11-15, ideas only:
+- ringbuf.js (padenot, MPL-2.0: no code may be copied into an MIT package): 8-byte header (write index, read index,
+  Uint32), `capacity + 1` slots (one wasted, so no pow2 mask), each side `Atomics.store`s only its own index after
+  copying, partial `push` / `pop` returning counts, a `.set()` fast path plus a loop unrolled by 16, and
+  `writeCallbackWithOffset` (zero-copy write into storage + two spans). Defect not to copy: `return cb(...) ||
+  to_write` publishes the whole reservation when a callback returns 0 (fail-open).
+- rtrb (Rust): `write_chunk(n)` / `read_chunk(n)` reserve, fill up to two slices, `commit(n)`; a request larger than
+  the free space is an error (`TooFewSlots`), not a partial move; each side caches the other side's index and reloads
+  it only when the cache says full / empty; the indices sit on separate cache lines; `is_abandoned()`.
+- ringbuf (agerasev, Rust): positions kept modulo 2 x capacity (as recalled, not checked against its source): no
+  wasted slot and no pow2 requirement.
+- Rigtorp SPSCQueue (C++): the write-up of the cached-index + padding technique.
+- JS limit: `Atomics` are sequentially consistent only; acquire / release tricks do not transfer.
+- Bar: ringbuf.js already holds this niche (SAB + Atomics, typed, maintained). Build only if it adds something real:
+  zero-GC reserve / commit through a caller-owned Int32Array of offsets, no wasted slot with a pow2 mask, a
+  fail-closed commit, an abandonment word, MIT. Otherwise document interop with ringbuf.js.
+- Unpark: ShellyProject needs live cross-thread streaming (rechecked 2026-11-06: it shares only fixed-layout
+  summaries across workers).
 
 ## Rejected (with reasons)
 
