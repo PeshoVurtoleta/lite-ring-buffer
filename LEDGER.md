@@ -325,7 +325,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 ### A15. copyLast bodies refused by the R3 research pass: shared check helper, one shared body, no ROT
 
-- **What happened.** The R3 research pass (2026-11-15, `.handoff/research/r3/`, build e3c1d42 / ff6ee762) built
+- **What happened.** The R3 research pass (2026-11-15, `.handoff/archive/1.5.0/research/r3/`, build e3c1d42 / ff6ee762) built
   `copyLast(dst, dstOffset, n)` four ways as module variants of the frozen file. All four pass a 16,236-case sweep
   against the last k of the frozen `copyTo`, the parity matrix (copyLast(count) === copyTo incl. every error case),
   the n list and the B/op + MEGA lanes (0 B per call). Refused: (1) SHARED (copyCheck takes n; copyTo passes count)
@@ -340,13 +340,14 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   two), feeding rotCopy from fields (OWN2) or re-reading `this.count` (SH2) changes nothing, no deopt
   (`--trace-deopt`), everything inlined (budget 483 -> 792 / 920); the gap grows with the rotate work (~8 ns with
   `set` only, ~90-135 ns with `copyWithin` + a 256-sample loop).
-- **Root cause.** Unknown (above). The refusals rest on the measured copyTo regression, not on a mechanism.
-- **Evidence.** `.handoff/research/r3/PROGRESS.md` rungs 0, 1, 2, 2b, 2c; `runs/rung0-check-v2.json` (untimed, host QUIET,
+- **Root cause.** Unknown at the time (above); found by R3-M1 (addition below): caller inlining, not either body. The
+  refusals rest on the measured copyTo regression, not on a mechanism.
+- **Evidence.** `.handoff/archive/1.5.0/research/r3/PROGRESS.md` rungs 0, 1, 2, 2b, 2c; `runs/rung0-check-v2.json` (untimed, host QUIET,
   load1 1.52 -> 1.46), `runs/rung1.md`, `rung2.md`, `rung2b.md`, `rung2c.md` (each `quiet-lock run` non-strict exit 2,
   host PRELIMINARY: another node process at 13-126% CPU, load1 1.79 -> 4.41 at worst; 2026-11-14T23:16Z-23:26Z,
   Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations; every timing PRELIMINARY; the strict
   hold was not run). Variants OWN 2f47eec8, SHARED 3aa1b723, DELEG 9810c2d8, NOROT 49866e6c, OWN2 b2473353, SH2
-  99390108; `.handoff/PROPOSAL-r3.md` sections 3-4 (reviewer APPROVED r3).
+  99390108; `.handoff/archive/1.5.0/PROPOSAL-r3.md` sections 3-4 (reviewer APPROVED r3).
 - **Law.** 1, 5, 7, 13.
 - **Gate.** None yet (refusal + research). The R3 build unit gates OWN: copyTo / copyToFast / copyCheck / rotCopy
   byte-identical to HEAD, the strict A/B on the real method. Reopen (1) / (2) only with a strict A/B showing copyTo
@@ -354,13 +355,13 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   ablation: OWN with the n check outside lastCheck), adopting a fix only on a strict A/B.
   Build-unit gates (2026-11-15, working tree on 4b471da / 9765c21e, review APPROVED): OWN gated by the identity / golden
   byte-identical check of copyTo / copyToFast / copyCheck / rotCopy, 259 tests, the R3 mutant runs (24 mutants, C14),
-  and the `npm run alloc` / `npm run torture` copyLast lanes (`.handoff/R3/gate/b2/verify.log`, run on the round-1 build 6d92ed1f; 9765c21e differs from it
-  by JSDoc and test assertions only; closing verify on 9765c21e: `.handoff/R3/verify-final.log`). Strict A/B
-  (`npm run bench:copylast`): strict A/B `.handoff/R3/ab/strict-1/` (quiet-lock --strict exit 0, QUIET, load1 2.06 ->
+  and the `npm run alloc` / `npm run torture` copyLast lanes (`.handoff/archive/1.5.0/R3/gate/b2/verify.log`, run on the round-1 build 6d92ed1f; 9765c21e differs from it
+  by JSDoc and test assertions only; closing verify on 9765c21e: `.handoff/archive/1.5.0/R3/verify-final.log`). Strict A/B
+  (`npm run bench:copylast`): strict A/B `.handoff/archive/1.5.0/R3/ab/strict-1/` (quiet-lock --strict exit 0, QUIET, load1 2.06 ->
   2.02 vs baseline 2.21, 2026-11-15, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28, K 21 x 3 compilations = 63
   paired rounds per row, 63 rounds, every timed column 0.00 B/op): caller workaround n 120 2.2-2.3x / n 512 1.5x
   slower than copyLast; copyLast(count) / copyTo 1.17x (h0) / 1.52x (h768) Float32, 1.00 Float64 -- the waived gap
-  confirmed on the strict host. inlining-budget-diff (REPORTED, `.handoff/R3/inl/main.log`, `ctl.log`): copyTo /
+  confirmed on the strict host. inlining-budget-diff (REPORTED, `.handoff/archive/1.5.0/R3/inl/main.log`, `ctl.log`): copyTo /
   copyCheck / rotCopy decisions and sizes unchanged (288 / 257 / 192 B); copyLast 295 / lastCheck 304 / copyLastFast
   195 B; lastCheck + rotCopy inline into copyLast, but copyLast compiled first is NOT inlined into its caller
   (cumulative budget 295 + 496 > 920 / 1.2).
@@ -368,7 +369,36 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   Q-R3-ZERO = "A Return 0 early"; Q-R3-PARGAP = "A Waive, ship OWN"; Q-R3-ORDER = "A (dst, off, n)"; Q-R3-FAST =
   "B Add copyLastFast" (new surface: the copyToFast pattern over the newest k, sharing lastCheck; allocates one
   `subarray` view per ring half, not measured this cycle); Q-R3-STRICT = "A Rule now, strict in build". Maintainer,
-  2026-11-15, AskUserQuestion, one sitting (`.handoff/PROPOSAL-r3.md` section 7).
+  2026-11-15, AskUserQuestion, one sitting (`.handoff/archive/1.5.0/PROPOSAL-r3.md` section 7).
+- **R3-M1 addition (2026-11-15): the mechanism is the caller's cumulative-inlining budget.** FILLER R3-M1 (research
+  ladder, `.handoff/research/r3-m1/`, build b690e9c / 9765c21e, no source edit; `test/bench/copylast-ab.mjs`
+  unmodified with `--cand` on research variants, parity rows, Float32; every run `quiet-lock run` non-strict exit 2 =
+  host PRELIMINARY only, every A/A / SLOW / B/op / BOX / oracle / TurboFan check in band). (1) Rung 1: moving the n check
+  (OUT_N) or the n check + min (OUT_NM) out of lastCheck into copyLast's body: 1.15 / 1.53 and 1.17 / 1.54 vs LIVE 1.14 /
+  1.53 (h0 / h768) -- NO EFFECT; lastCheck is inlined into copyLast either way (reading, not traced), and both stayed over
+  the reserve (chains 799 / 806 B; D13).
+  (2) Rung 2: `--trace-turbo-inlining` in the A/B's own driver: copyTo (288 B + 449 inlined = 737) inlines into its
+  driver; copyLast (295 + 496 = 791 > 920 / 1.2 = 767) does not. With `--max-inlined-bytecode-size-cumulative=2400`
+  (both inline) copyLast(count) / copyTo = 1.01 / 1.00 (167.0 vs 166.6 ns at h768); at `=300` (neither inlines, and the
+  check helpers stop inlining too) 1.01 / 1.00 with copyTo at 263.6 ns -- the gap is copyLast not being inlined into its
+  caller: ~8 ns at h0 / ~86-92 ns at h768 (default vs b2400 CAND 59.2 / 51.3 and 259.4 / 167.0 ns; LIVE vs SLIM2 254.7 /
+  168.4 ns); consistent with every R3 row by chain-size arithmetic (not traced: FR copyTo 737 fast; OWN 792, SHARED
+  copyTo 789, DELEG 812, OWN2 / SH2 slow). (3) Rung 3a:
+  SLIM2 (lastCheck's type / n / bounds checks share one throw site with a cold `lastArgError`, alias / storage one with
+  a cold `lastStateError`) cuts lastCheck 304 -> 278 B, chain 765 B: copyLast inlines at default flags and reads 1.01 /
+  1.00 and 1.00 / 1.00 (two runs, c194837a), 1.00 / 1.01 (final e20476df); the near-miss control SLIM (chain 772 B)
+  keeps 1.15 / 1.52. The claim review caught c194837a changing the error for an other-realm DataView dst with a bad n
+  (RangeError instead of 1.5.0's native TypeError; pinned by test/copylast.test.js "kills X10"); e20476df reads the
+  length in the cold builder first (hot body unchanged, 278 B) and matches 1.5.0 on 260,580 cases (copyLast +
+  copyLastFast, 10 dst kinds incl. that one; storage, cache-hit and frozen-ring paths not in the matrix). Still unknown: why a called ROT path costs more in
+  proportion to the rotate work. Evidence: `.handoff/research/r3-m1/PROGRESS.md` rungs 0-3a, `runs/rung1-*`,
+  `runs/rung2-*`, `runs/rung2-trace/`, `runs/rung3a-*` (2026-11-15T03:20Z-03:42Z, Apple M4 Pro, Node v26.8.2 / V8
+  14.6.202.34-node.28, K 21 x 3 compilations per row, load1 3.78-6.24 vs baseline 2.21, another package's node process
+  at 100-133% CPU; every timing PRELIMINARY; the strict hold of LIVE vs SLIM2 was not run). Law 13: the waiver
+  (Q-R3-PARGAP A) stands until `.handoff/PROPOSAL-r3-m1.md` is ruled; adopting SLIM2 needs a strict A/B with
+  copyLast(count) / copyTo <= 1.05 at h0 and h768, behaviour parity, and a gate on the chain size (its margin is < 2 B
+  and depends on V8's bytecode sizes and budget constants, and on the caller: a caller with no budget left inlines
+  neither method).
 
 ---
 
@@ -597,7 +627,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   counts against one 4-class budget. A `rotCopy` clone for copyLast would be a DESIGN change, not proposed; unpark
   only on a measured MEGA ROT need (a caller whose Float32 `dst` classes exceed the shared budget on a whole-window
   path).
-- **Evidence.** `.handoff/R3/PLAN-G1.md` addendum A6 (review r1 REJECTED, 3 LITERAL); build 9765c21e (working tree on 4b471da)
+- **Evidence.** `.handoff/archive/1.5.0/R3/PLAN-G1.md` addendum A6 (review r1 REJECTED, 3 LITERAL); build 9765c21e (working tree on 4b471da)
   carries the doc fix; the probe has no run log, so this entry quotes no measurement.
 - **Law.** 7.
 - **Gate.** None for the shared budget itself (documented, not gated: the `npm run alloc` MEGA lanes gate the per-family
@@ -824,7 +854,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1.
 - **Gate.** `test/mutant-kills.test.js` (13 mutants, 8 tests; counted by `test/count.mjs`). Re-opens if any
   engine method gains a branch with no test that fails when that branch is mutated.
-- **R3 addition (2026-11-15).** The R3 mutant set (24 mutants, `.handoff/R3/mutants/`, `run.log`: every one fails at
+- **R3 addition (2026-11-15).** The R3 mutant set (24 mutants, `.handoff/archive/1.5.0/R3/mutants/`, `run.log`: every one fails at
   least one test, or the alloc / torture lane for the two lane mutants) all die, M7 included: M7 is NOT equivalent
   under the literal-0 return (on a non-empty ring n = -0 gives k = -0; without `if (k === 0) return 0;` copyLast
   returns -0, killed by `test/copylast.test.js`). `test/mutant-kills.test.js` is now 10 tests.
@@ -869,9 +899,9 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Root cause.** The check-order test pinned n before bounds before alias / storage, but not alias before storage
   and not the dst TypeError before the `n` RangeError for a DataView from another realm (law 1).
 - **Fix.** Two cases added to the check-order test in `test/copylast.test.js`.
-- **Evidence.** `.handoff/R3/PLAN-G1.md` addendum A6 (2); build 9765c21e,
+- **Evidence.** `.handoff/archive/1.5.0/R3/PLAN-G1.md` addendum A6 (2); build 9765c21e,
   `test/copylast.test.js` check-order test (the `kills X2` / `kills X10` cases); no run log of X2 / X10 is kept
-  (`.handoff/R3/mutants/run.log` is the 24-mutant R3 set, run on round-1 build 6d92ed1f before these pins).
+  (`.handoff/archive/1.5.0/R3/mutants/run.log` is the 24-mutant R3 set, run on round-1 build 6d92ed1f before these pins).
 - **Law.** 1.
 - **Gate.** `test/copylast.test.js`, the check-order test (message order). Reopens if a check is added to
   `lastCheck` with no test that fails when its position is mutated.
@@ -1051,7 +1081,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 ### D12. Probe harness traps in the R3 research: a per-call closure in a column, reps sized from cold code, a column assumed privileged
 
-- **What happened.** Three traps in `.handoff/research/r3/probe-copylast.mjs` (2026-11-15), each caught before a
+- **What happened.** Three traps in `.handoff/archive/1.5.0/research/r3/probe-copylast.mjs` (2026-11-15), each caught before a
   number was used: (1) the CALLER column was written as a per-call IIFE, which allocated ~58-64 B per call of harness
   (rung 0 v1, `runs/rung0-check-v1.json`); and v1's BOX must-allocate control read 11.74 B at 20,000 calls per window,
   under the INTAKE's 12 B, so v2 moved to a named function and >= 100,000 calls per window; (2) `reps` was sized from
@@ -1063,8 +1093,28 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Root cause.** (1) A closure literal in a hot expression allocates a JSFunction per call; a control's threshold
   must be met at the window size used. (2) Cold-code timing is 10x+ slower, so derived sample sizes come out short.
   (3) A ratio against one column cannot tell "this column is fast" from "the others are slow" without a twin of it.
-- **Evidence.** `.handoff/research/r3/PROGRESS.md` rung 0 (harness v1 -> v2), "Timed harness prepared", rung 2b;
+- **Evidence.** `.handoff/archive/1.5.0/research/r3/PROGRESS.md` rung 0 (harness v1 -> v2), "Timed harness prepared", rung 2b;
   `runs/rung0-check-v1.json`, `rung0-check-v2.json`, `runs/smoke.*`, `runs/rung2b.md` (Node v26.8.2, hosts as stated there).
 - **Law.** 1 (a control must fire at the size used), 4 (a lane must measure the code it claims, not the harness).
 - **Gate.** None (research harness). A probe column calls named functions only; reps are sized after warm-up; a
   reference column that decides a kill rule gets a twin (A/A of the reference, not only of the candidate).
+
+### D13. A method-vs-method ratio measured the caller's inlining budget, not the bodies (R3-M1)
+
+- **What happened.** The R3 research and the R3 strict A/B read copyLast(count) at 1.15-1.17x / 1.52-1.76x of copyTo
+  (Float32 1024, h0 / h768) and attributed the gap to copyLast's body ("every body whose inlined check helper carries
+  copyLast's n check and min is slow"). R3-M1 rung 1 then moved those checks out of the helper and saw no change -- an ablation
+  that left the graph roughly the same (reading: the helper is inlined into the body either way) and the chain on the
+  same side of the reserve (791 -> 799 / 806 B). Rung 2 found the real
+  variable: whether the method is inlined into the benchmark's driver (A15 R3-M1 addition).
+- **Root cause.** Both columns time "driver -> method", and V8 inlines the method into the driver only while its
+  inlined chain fits the cumulative reserve (920 / 1.2). Two bodies on either side of that line differ by the cost of
+  the non-inlined compile (cause not isolated; rung 3b not run), which here scales with the work inside (~8 ns to
+  ~86-92 ns), so a byte-level change anywhere in the chain can move the ratio by 1.5x. Relocating code into an inlined
+  callee leaves the graph roughly the same (reading) but changes the chain's bytecode size, which decides caller inlining.
+- **Evidence.** `.handoff/research/r3-m1/PROGRESS.md` rungs 1, 2, 3a; `runs/rung2-trace/` (default / 2400 / 300 /
+  slim2 / slim traces); `runs/rung1-*`, `runs/rung2-*`, `runs/rung3a-*` (2026-11-15, hosts as stated there, PRELIMINARY).
+- **Law.** 12 (scope a measurement: name what the driver inlines), 13.
+- **Gate.** None (research). A speed comparison between two methods records `--trace-turbo-inlining` for each driver
+  and reports the cumulative chain size of each side first; an ablation tests code cost only if both sides stay on the
+  same side of the reserve.

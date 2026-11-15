@@ -171,7 +171,7 @@ each for Float32 and Float64 `src`.
 
 ### R3 -- `copyLast(dst, dstOffset, n)`: copy only the newest n samples, oldest-first
 
-RULED 2026-11-15 (research pass, `.handoff/PROPOSAL-r3.md` section 7, LEDGER A15): the ruled PROPOSAL supersedes this
+RULED 2026-11-15 (research pass, `.handoff/archive/1.5.0/PROPOSAL-r3.md` section 7, LEDGER A15): the ruled PROPOSAL supersedes this
 sketch where they differ -- the bounds check is `dstOffset + n <= dst.length` (n, not k; Q-R3-BOUNDS); k = 0 returns 0
 before the alias / storage checks; copyLast has its own check helper and store sites, copyTo stays byte-identical
 (Q-R3-BODY); a `copyLastFast(dst, dstOffset, n)` (allocating `set` + `subarray`, the copyToFast pattern) is added
@@ -180,6 +180,10 @@ parity gate is output / throw only (Q-R3-PARGAP); the strict A/B runs in the bui
 
 BUILT 2026-11-15 (bb0459b / 9765c21e; review APPROVED; qa PASS 2026-11-15, +22 boundary tests in test/qa-r3.test.js); shipped in 1.5.0: `copyLast` + `copyLastFast`, 281 tests;
 the strict A/B (`npm run bench:copylast`) exit 0 (see LEDGER A15).
+MECHANISM FOUND 2026-11-15 (FILLER R3-M1, research ladder `.handoff/research/r3-m1/`, PRELIMINARY; LEDGER A15 "R3-M1
+addition", D13): the copyLast(count) gap is the caller's cumulative-inlining budget (copyLast's inlined chain 791 B is
+over 920 / 1.2, copyTo's 737 B is not), not either body. A trimmed lastCheck (SLIM2, chain 765 B) inlines and ties copyTo;
+`.handoff/PROPOSAL-r3-m1.md` (Q-M1-ADOPT / GATE / STRICT) is NOT RULED -- the waiver (Q-R3-PARGAP A) stands until it is.
 
 Real gap. A sparkline or oscilloscope trace wants the last 120 or 512 samples of a 1024 ring, not all of
 `count`. Today the caller copies everything and slices: O(capacity) work and a second buffer.

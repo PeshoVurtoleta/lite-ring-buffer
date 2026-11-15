@@ -1,5 +1,5 @@
 // R3 copyLast / copyLastFast parity oracle (GROUP G1 batch H, TASK 5): ASSERTION A4 of
-// .handoff/R3/PLAN-G1.md. copyLast(d, off, count) must equal copyTo(d', off) on twin rings:
+// .handoff/archive/1.5.0/R3/PLAN-G1.md. copyLast(d, off, count) must equal copyTo(d', off) on twin rings:
 // outcome, return, error class, error message (method names mapped to one name), dst bytes,
 // ring state and cache state; copyLastFast likewise against copyToFast, and against copyLast.
 // Expected values for the lying-subclass lane come from a plain model (Math.fround then the

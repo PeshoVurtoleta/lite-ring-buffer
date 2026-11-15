@@ -1,6 +1,6 @@
 // copylast-probe.mjs -- ONE (kind, ring, n, dst type) config x ONE compilation of the copyLast A/B bench.
 // Spawned by test/bench/copylast-ab.mjs (never run by `npm test` / `npm run verify`); prints one JSON line.
-// Port of pushbatch-probe.mjs and of the R3 research probe (.handoff/research/r3/probe-copylast.mjs: callerCopy,
+// Port of pushbatch-probe.mjs and of the R3 research probe (.handoff/archive/1.5.0/research/r3/probe-copylast.mjs: callerCopy,
 // values, configs, LEDGER D12 harness v3) to the REAL modules.
 //
 //   node --allow-natives-syntax --expose-gc test/bench/copylast-probe.mjs

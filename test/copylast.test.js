@@ -1,5 +1,5 @@
 // R3 copyLast / copyLastFast oracle (GROUP G1 batch H, TASK 4): ASSERTIONS A1, A2, A3
-// of .handoff/R3/PLAN-G1.md plus addenda A1 (literal 0 at k === 0) and A2 (exact n message).
+// of .handoff/archive/1.5.0/R3/PLAN-G1.md plus addenda A1 (literal 0 at k === 0) and A2 (exact n message).
 // Expected values come from a plain array of the pushed values (Math.fround, then the
 // destination element type's own conversion) and from the message texts in the plan;
 // never from copyTo and never from a run of the build.
