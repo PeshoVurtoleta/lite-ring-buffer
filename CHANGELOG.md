@@ -10,6 +10,10 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Docs
+
+- One package-wide out-of-contract note for `copyTo`, `copyToFast`, `copyLast`, `copyLastFast` and `pushBatch` (README "Edge cases & guarantees", `llms.txt`, the `RingBuffer.d.ts` class JSDoc, and the matching `RingBuffer.js` comments; comments only, no code change): the `%TypedArray%.prototype` getters and `set` / `copyWithin` are captured at load, while the globals `ArrayBuffer.isView`, `Number.isInteger`, `DataView`, `Object.isExtensible` (and `Math.min`, `data.subarray` and the `constructor` / `Symbol.species` lookups it makes, for the Fast methods) and every captured intrinsic's `call` resolve at call time; replacing them is unsupported. The existing `copyLast` lists now name every builtin the checks consult and point to the note for the full set.
+
 ## [1.5.4] - 2026-11-15
 
 ### Docs

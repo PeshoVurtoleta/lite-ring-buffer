@@ -52,7 +52,7 @@ A new feature here must serve the telemetry -> canvas / stats pipeline, keep `da
 ### D -- carried debt (suite law, not features)
 
 STATUS 2026-11-10: committed 1d6e368 (2026-11-10); closing `npm run verify` under the quiet lock
-2026-11-10 07:17Z exit 0, host PRELIMINARY (load1 5.14 vs baseline 2.21). Follow-ups: D2 below. Spec and evidence: `.handoff/D/` (gitignored).
+2026-11-10 07:17Z exit 0, host PRELIMINARY (load1 5.14 vs baseline 2.21). Follow-ups: D2 below. Spec and evidence: `.handoff/archive/1.2.1/D/` (gitignored).
 
 ShellyProject's proof layer cites this package's zero-GC claim, so suite law must hold. One tooling batch:
 - migrate the tests from vitest to `node:test` (`package.json` `test` script included);
@@ -65,7 +65,7 @@ files finds nothing.
 
 STATUS 2026-11-10: done in the working tree (reviewer APPROVED, qa PASS), awaiting the maintainer's commit;
 closing `npm run verify` under the quiet lock 2026-11-10 07:50Z exit 0, host PRELIMINARY (load1 3.63 vs
-baseline 2.21), Node v26.8.2; log .handoff/D2/qa/q7-verify.txt.
+baseline 2.21), Node v26.8.2; log .handoff/archive/1.2.1/D2/qa/q7-verify.txt.
 
 - Test-count floor (DONE, R-2): `npm test` = `node test/count.mjs` (node:test `run()` over the explicit file
   list with `--expose-gc`; fails unless exactly 59 tests pass, 0 fail, 0 skipped / todo, no failed suite, no
@@ -84,7 +84,7 @@ baseline 2.21), Node v26.8.2; log .handoff/D2/qa/q7-verify.txt.
 ### LU -- inlining-budget gate (tooling + docs; no runtime change)
 
 STATUS 2026-11-11: done in the working tree (reviewer APPROVED B1 + B2; B3 docs; qa: see NEXT.md), awaiting the
-maintainer's commit. Spec and evidence: `.handoff/LU/` (gitignored). Adds `npm run inline-diff`
+maintainer's commit. Spec and evidence: `.handoff/archive/1.3.0/LU/` (gitignored). Adds `npm run inline-diff`
 (`test/tools/inline-diff.mjs`) over the vendored `test/tools/inlining-budget-diff.sh` (LiteUtils 465881b, pinned
 by sha256) and `test/InliningTool.test.js` (31 tests; `npm test` = 59 + 31 = 90). Details: LEDGER C10 / C11.
 LU2 STATUS 2026-11-14: done in the working tree (reviewer APPROVED B1 + B2), awaiting the maintainer's commit.
@@ -138,9 +138,9 @@ masked loop; routing as built: a full Float32 ring above 32 samples -> ROT, ever
 
 STATUS 2026-11-12: DONE. R1 build 99e8749 + bench 5ae2266 (`npm run bench:copyto`) + the R1b fix in the working
 tree (Q-R1B-FIX = V-split32c, Q-R1B-ROUTER = loop at <= 32, which amends Q-R1 "`COPY_LOOP_MAX` goes"); reviewer
-APPROVED. Closing `npm run verify` (`.handoff/r1b-fix/evidence/burst-verify.log`, Node v26.8.2, host PRELIMINARY
+APPROVED. Closing `npm run verify` (`.handoff/archive/1.3.0/r1b-fix/evidence/burst-verify.log`, Node v26.8.2, host PRELIMINARY
 load1 4.72 vs baseline 2.21) exit 0, 130 / 130 tests, 1024-sample `copyTo` 0.0-0.2 B/op. Speed (REPORTED from one
-strict A/B, host QUIET, `.handoff/r1b-fix/T5-SUMMARY.md`): vs 1.2.1 at 32 samples 1.33-1.38x slower; at 1024 /
+strict A/B, host QUIET, `.handoff/archive/1.3.0/r1b-fix/T5-SUMMARY.md`): vs 1.2.1 at 32 samples 1.33-1.38x slower; at 1024 /
 Float32 contiguous 0.75x, wrapped 3.10x, partial 3.75x (the worst cells), Float64 dst 0.41-0.61x. Docs batch B4
 (README / llms.txt / .d.ts / CHANGELOG / LEDGER / ROADMAP) is in progress. Release 1.3.0 is on HOLD: the
 maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C13, D8-D10 added.
@@ -150,7 +150,7 @@ maintainer's call; no version bump here. LEDGER B4 / B5 closed, B7, A12, C12, C1
 RULED 2026-11-12 (research pass, `.handoff/archive/1.5.3/PROPOSAL-r2.md` section 7, LEDGER A13): the ruled PROPOSAL supersedes
 this sketch where they differ -- count > capacity keeps physical n x push parity (head = (head + count) & mask, not
 head = 0); src is Float32Array / Float64Array only (other TypedArrays, BigInt included, TypeError); `set` only for a
-whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c). Post-release light audit 2026-11-15 (one Opus reviewer, read-only, eef921f / eaa32ee7 vs 3860688 / ff6ee762): FINDINGS, no DEFECT -- 3 DOC fixed in the working tree (README destroy / batch-ingest wording, .d.ts frozen count-0), 2 JSDoc NITs deferred to the next unit touching RingBuffer.js, 1 test gap (no alloc lane for a resizable-buffer / other-realm `src`; resizable-buffer views measured <= 0.25 B/op untimed, REPORTED; other-realm not measured) left as a FILLER. Evidence .handoff/audit-1.4.0/.
+whole Float32 src; src sharing the ring's buffer -> RangeError. BUILT 2026-11-14 on the working tree (review-APPROVED ff6ee762; adds Q-R2-FROZEN / Q-R2-DATA / Q-R2-TAMPER, LEDGER A13 / B10); shipped in 1.4.0 (f03561c). Post-release light audit 2026-11-15 (one Opus reviewer, read-only, eef921f / eaa32ee7 vs 3860688 / ff6ee762): FINDINGS, no DEFECT -- 3 DOC fixed in the working tree (README destroy / batch-ingest wording, .d.ts frozen count-0), 2 JSDoc NITs deferred to the next unit touching RingBuffer.js, 1 test gap (no alloc lane for a resizable-buffer / other-realm `src`; resizable-buffer views measured <= 0.25 B/op untimed, REPORTED; other-realm not measured) left as a FILLER. Evidence .handoff/archive/1.4.0/audit-1.4.0/.
 
 Real gap: AudioWorklet blocks (128 frames), WebSocket chunks and physics sub-steps arrive as slices. lite-o1
 `RingLog` has no bulk push either.

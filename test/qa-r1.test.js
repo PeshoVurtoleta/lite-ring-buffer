@@ -4,7 +4,7 @@
 // into a fresh array of that kind; ring geometry for field-set states comes
 // from the documented field meaning (head = next write slot, count = live
 // samples) with `%`, never the engine's `& mask`. Every test has a must-fail
-// control (a frozen build or a named mutant): .handoff/qa-r1/QA-REPORT.md.
+// control (a frozen build or a named mutant): .handoff/archive/1.3.0/qa-r1/QA-REPORT.md.
 // Build under test: RB_BUILD (absolute or package-relative) else
 // ../RingBuffer.js. No test reads a cache field by name.
 import { describe, it } from 'node:test';

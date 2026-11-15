@@ -1,7 +1,7 @@
 // deopt-driver.mjs -- the ONE driver of `npm run deopt-diff` (test/tools/deopt-diff.mjs, unit LU2), run by
 // deopt-diff.sh of the exact-pinned devDependency @zakkster/lite-utils 1.0.0 for RingBuffer#copyTo and
 // RingBuffer#pushBatch (R2).
-// Two phases. Phase 1 (copyTo) is .handoff/R1/deopt/ctl-before/drv.mjs lines 9-67 (R1 T7: drv-f32 + the SWITCH
+// Two phases. Phase 1 (copyTo) is .handoff/archive/1.3.0/R1/deopt/ctl-before/drv.mjs lines 9-67 (R1 T7: drv-f32 + the SWITCH
 // line), unchanged. Phase 2 (pushBatch, R2) is appended after it and runs only when
 // RingBuffer.prototype.pushBatch is a function (a build before R2, e.g. the git-HEAD side before R2 is committed,
 // prints 'drv pushBatch skipped' and has no pushBatch to compare); it never calls copyTo, so phase 1's copyTo

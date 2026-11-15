@@ -92,14 +92,34 @@ const COPY_LOOP_MAX = 32;
 const TA_LENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Float32Array.prototype), 'length').get;
 
 /**
- * The rest of the %TypedArray%.prototype intrinsics `copyTo` / `copyToFast`
- * use, captured once at module load so a subclass (or a patched prototype)
- * cannot change what they read or write:
+ * The rest of the %TypedArray%.prototype intrinsics the copy methods
+ * (`copyTo` / `copyToFast` / `copyLast` / `copyLastFast`) and `pushBatch`
+ * use, captured once at module load so a subclass (or a prototype patched
+ * after load) cannot change what they read or write:
  *  - TA_TAG: the Symbol.toStringTag getter, the array's real element type
  *    ('Float32Array' for a subclass too; undefined for a non-TypedArray).
  *  - TA_BUFFER: the `buffer` getter, for the alias check. A subclass's own
  *    `buffer` getter can lie; this one cannot.
  *  - TA_SET / TA_COPY_WITHIN: the `set` and `copyWithin` methods.
+ *
+ * Out of contract, package-wide: only the intrinsics themselves (these and
+ * TA_LENGTH) are captured. The check helpers (`copyCheck` for `copyTo` /
+ * `copyToFast`, `batchCheck` for `pushBatch`, `lastCheck` for `copyLast` /
+ * `copyLastFast`) and the method bodies still resolve, at call time, each a
+ * subset per method: the globals `ArrayBuffer.isView`, `Number.isInteger`,
+ * `DataView` (the `instanceof` check) and `Object.isExtensible` (only when
+ * the call has at least one sample to copy or push, on an alias-cache miss);
+ * `Math.min`, `data.subarray` and the `data.constructor` /
+ * `Symbol.species` lookups `subarray` itself makes (the two Fast methods
+ * only); on a throw, the globals `TypeError` and `RangeError` (and
+ * `String` for a bounds message in the four copy methods); and the `call`
+ * of every captured intrinsic, getter or method (TA_LENGTH, TA_TAG,
+ * TA_BUFFER, TA_SET, TA_COPY_WITHIN, each called as `TA_X.call(...)`:
+ * `Function.prototype.call` unless the intrinsic has its own or inherited
+ * `call`). Replacing any of those globals or builtins, or anything that
+ * changes what an intrinsic's `call` resolves to (a replaced or deleted
+ * `Function.prototype.call`, an own `call` property on the intrinsic, a
+ * changed prototype of it), is unsupported (out of contract).
  */
 const TA_PROTO = Object.getPrototypeOf(Float32Array.prototype);
 const TA_TAG = Object.getOwnPropertyDescriptor(TA_PROTO, Symbol.toStringTag).get;
@@ -336,9 +356,9 @@ function lastNError(name, n) {
  * is the intrinsic length getter's `call`; anything that changes what that
  * `call` resolves to -- a replaced or deleted `Function.prototype.call`, an
  * own `call` property on the getter, a changed prototype of the getter --
- * would run user code in that window and is unsupported). The file's
- * only `var`: a module `let` costs 7 B of the chain's 1 B margin (LEDGER
- * A15 R3-M2).
+ * would run user code (or throw) in that window and is unsupported). The
+ * file's only `var`: a module `let` costs 7 B of the chain's 1 B margin
+ * (LEDGER A15 R3-M2).
  */
 var lastDv = false;
 
@@ -408,17 +428,17 @@ function lastStateError(rb, data, dst, name) {
  * when `n` and `dstOffset` passed, and `lastArgError` asks itself only when
  * one of them failed.
  *
- * The checks call the GLOBAL `ArrayBuffer.isView`, `Number.isInteger` and
- * `DataView` (its Symbol.hasInstance) and the intrinsic length getter's
- * `call` at call time. A failing call may call `isView` / `isInteger` more
- * times than 1.5.0. A bounds failure with `n` and `dstOffset` both
- * non-negative integers reads `dst`'s length twice (the hot body, then
- * `lastArgError`); on an `n` / `dstOffset` failure the hot body never
- * reads it. A replaced builtin, or anything that changes what the length
- * getter's `call` resolves to (a replaced or deleted
- * `Function.prototype.call`, an own `call` property on the getter, a changed
- * prototype of the getter), is unsupported (out of contract). A failing
- * alias / storage call re-reads the intrinsic getters.
+ * The checks call the GLOBAL `ArrayBuffer.isView`, `Number.isInteger`,
+ * `DataView` (its Symbol.hasInstance) and `Object.isExtensible` and the
+ * intrinsic length and buffer getters' `call` at call time. A failing call
+ * may call `isView` / `isInteger` more times than 1.5.0. A bounds failure
+ * with `n` and `dstOffset` both non-negative integers reads `dst`'s length
+ * twice (the hot body, then `lastArgError`); on an `n` / `dstOffset`
+ * failure the hot body never reads it. A replaced builtin, or anything that
+ * changes what those getters' `call` resolves to (a replaced or deleted
+ * `Function.prototype.call`, an own `call` property on a getter, a changed
+ * prototype of it), is unsupported (out of contract; see the note above
+ * TA_PROTO). A failing alias / storage call re-reads the intrinsic getters.
  *
  * The inlined chain copyLast + lastCheck + rotCopy is held at <= 766 B of
  * bytecode (V8's cumulative-inlining reserve, 920 / 1.2; 765 B on the
@@ -835,12 +855,12 @@ export class RingBuffer {
      * unchanged from 1.5.0, and a view `dst` sees exactly one
      * `dst instanceof DataView` per call (a user `DataView[Symbol.hasInstance]`
      * runs once). The checks call the global `ArrayBuffer.isView`,
-     * `Number.isInteger` and `DataView` at call time; a replaced builtin, or
-     * anything that changes what the length getter's `call` resolves to, is
-     * unsupported (see `lastCheck`). The checks live in a shared helper
-     * (`lastCheck`, also used by `copyLastFast`). The alias cache
-     * (`_bufOf` / `_buf`) is the one `copyTo` / `pushBatch` use, with the
-     * same rules (see `copyTo`).
+     * `Number.isInteger`, `DataView` and `Object.isExtensible` at call time;
+     * a replaced builtin, or anything that changes what an intrinsic's
+     * `call` resolves to, is unsupported (see `lastCheck` and the note above
+     * TA_PROTO). The checks live in a shared helper (`lastCheck`, also used
+     * by `copyLastFast`). The alias cache (`_bufOf` / `_buf`) is the one
+     * `copyTo` / `pushBatch` use, with the same rules (see `copyTo`).
      *
      * @param {Float32Array|Float64Array} dst destination -- caller owns it.
      * @param {number|undefined} dstOffset undefined means 0.

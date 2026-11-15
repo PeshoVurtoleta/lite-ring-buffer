@@ -27,6 +27,28 @@ export interface TryPushOptions {
  * Capacity is rounded UP to the next power of two so wrap-around uses a
  * single bitwise AND instead of a modulo. `copyTo`, `forEach` and iteration
  * are oldest-first; `get(0)` returns the newest sample.
+ *
+ * CALL-TIME LOOKUPS OF THE BULK METHODS (out of contract if replaced).
+ * `copyTo`, `copyToFast`, `copyLast`, `copyLastFast` and `pushBatch` capture
+ * the `%TypedArray%.prototype` getters (`length`, `buffer`,
+ * `Symbol.toStringTag`) and the `set` / `copyWithin` methods once, at module
+ * load, so a prototype getter patched after load, or a subclass's own getter,
+ * cannot change what they read: that is a guarantee. They still resolve, at
+ * call time, each a subset per method: the globals `ArrayBuffer.isView`,
+ * `Number.isInteger`, `DataView` (the `instanceof` check) and
+ * `Object.isExtensible` (only when the call has at least one sample to copy
+ * or push, on an alias-cache miss); `Math.min`, `data.subarray` and the
+ * `data.constructor` / `Symbol.species` lookups `subarray` itself makes (the
+ * two Fast methods only); on a throw, the globals `TypeError` and `RangeError`
+ * (and `String` for a bounds message in the four copy methods); and the `call`
+ * of every captured intrinsic getter and method (`Function.prototype.call`
+ * unless the intrinsic has its own or inherited `call`). User code installed
+ * on any of these can run inside a call, outside the one `DataView` window
+ * `copyLast` documents (`instanceof` also walks `dst`'s prototype chain, so a
+ * Proxy there runs its trap). Replacing any of those globals or builtins, or
+ * anything that changes what an intrinsic's `call` resolves to (replacing or
+ * deleting `Function.prototype.call`, an own `call` property on an intrinsic,
+ * a changed prototype of an intrinsic), is unsupported (out of contract).
  */
 export class RingBuffer implements Iterable<number> {
     /** Capacity the caller asked for (floored), before pow2 rounding. */
@@ -252,13 +274,17 @@ export class RingBuffer implements Iterable<number> {
      * tell it from 1.5.0: `n` / `dstOffset` are tested before the DataView
      * check, a failing call may call the global `ArrayBuffer.isView` /
      * `Number.isInteger` more often, and a bounds failure with a valid
-     * `dstOffset` reads `dst`'s length twice. The checks use the GLOBAL
-     * `ArrayBuffer.isView`, `Number.isInteger`, `DataView` and the intrinsic
-     * length getter's `call` at call time; replacing any of them, or
-     * anything that changes what that getter's `call` resolves to (replacing
-     * or deleting `Function.prototype.call`, an own `call` property on the
-     * getter, or a changed prototype of the getter), is unsupported (out of
-     * contract).
+     * `dstOffset` reads `dst`'s length twice. The checks use the global
+     * `ArrayBuffer.isView`, `Number.isInteger`, `DataView` and
+     * `Object.isExtensible`, and the `call` of the intrinsic length and
+     * `buffer` getters, at call time (`copyLast`'s store
+     * dispatch, after the checks, also calls the `Symbol.toStringTag`
+     * getter's `call`; `copyLastFast` never does); replacing any of them, or
+     * anything that changes what those getters' `call` resolves to
+     * (replacing or deleting `Function.prototype.call`, an own `call`
+     * property on a getter, or a changed prototype of a getter), is
+     * unsupported (out of contract). The call-time lookups of every bulk
+     * method are listed in the {@link RingBuffer} class note.
      *
      * ALLOCATION: 0 B in steady state under the same rule as {@link copyTo}:
      * each of its three store sites (a Float32Array `dst`, a Float64Array
