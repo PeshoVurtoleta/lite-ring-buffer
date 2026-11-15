@@ -732,7 +732,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 
 - **What happened.** The README said the `& mask` wrap-around "on V8 is roughly 3-5x cheaper in tight loops" with no run log (law 5). B1 measured it (`wrap-step n1024`, `wrap-push n1024`; REPORTED): `% capacity` costs 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity (1024) and 5.630x [5.583..5.799] at a non-power-of-two capacity (1023); inside a hand-rolled Float32Array push 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. Only against a non-power-of-two `%` does the measured gap reach the claimed band (3.204x inside a push, 5.630x per step); at the same power-of-two capacity it is 1.784x per step and 1.057x inside a push.
 - **Root cause.** An estimate written as a measurement.
-- **Evidence.** `.handoff/B1/strict-1/compare.md` (one strict QUIET run, 2026-11-15T17:21Z, Apple M4 Pro, Node v26.8.2, load1 2.62 at start / 1.68 at end, K 21 x 3 compilations, HEAD 6431ec9, RingBuffer.js 90f7ad7c); README before the fix: `.handoff/B1/frozen/README.md` 829475e5 (= `git show 6431ec9:README.md`).
+- **Evidence.** `.handoff/archive/1.5.3/B1/strict-1/compare.md` (one strict QUIET run, 2026-11-15T17:21Z, Apple M4 Pro, Node v26.8.2, load1 2.62 at start / 1.68 at end, K 21 x 3 compilations, HEAD 6431ec9, RingBuffer.js 90f7ad7c); README before the fix: `.handoff/archive/1.5.3/B1/frozen/README.md` 829475e5 (= `git show 6431ec9:README.md`).
 - **Law.** 5.
 - **Gate.** None (REPORTED). `npm run bench:compare` prints the QUOTE-OP / QUOTE-PUSH lines.
 
@@ -1033,7 +1033,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **What happened.** Caught by review round 1 (compare.mjs 2eea7409 -> 21a15822): a compilation with no `rounds` pooled nothing and the row stayed VALID; a probe with a different K was accepted; the QUOTE lines tagged smoke but not a non-quiet host; MOD_NP2's capacity was unlabelled.
 - **Root cause.** The judge trusted the probe's output shape instead of checking it (laws 1, 2).
 - **Fix.** `rounds` length == K >= 5 per compilation, the probe's K is checked, a host tag is on the QUOTE lines, every per-round ratio is finite and > 0, VOID rows mask their ns cells, and the MOD / MOD_NP2 capacities are named on the QUOTE lines (COL_NOTE label).
-- **Evidence.** compare.mjs 2eea7409 -> 21a15822; `.handoff/B1/reviews/code-review.md`; fix-revert runs `.handoff/B1/coder/mut/fix.{rounds,perround,hosttag,nsmask}.out`.
+- **Evidence.** compare.mjs 2eea7409 -> 21a15822; `.handoff/archive/1.5.3/B1/reviews/code-review.md`; fix-revert runs `.handoff/archive/1.5.3/B1/coder/mut/fix.{rounds,perround,hosttag,nsmask}.out`.
 - **Law.** 1, 2.
 - **Gate.** `node test/bench/compare.mjs --self-test` (106 checks; reverting the rounds, per-round-ratio, host-tag, ns-mask or COL_NOTE-label fix turns it red; the probe-K accept check, compare.mjs:518, has no self-test case).
 

@@ -10,6 +10,8 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-15
+
 ### Docs
 
 - README: the unsourced wrap-cost claim (`& mask` roughly 3-5x cheaper than `%`) is replaced by measured figures (REPORTED, one strict QUIET run 2026-11-15, Apple M4 Pro, Node v26.8.2, load1 2.62 at start / 1.68 at end, K 21 x 3 compilations): per wrap step `% capacity` is 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity and 5.630x [5.583..5.799] at a non-power-of-two one; inside a hand-rolled Float32Array push 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. The FAQ no longer says `%` is a division.
