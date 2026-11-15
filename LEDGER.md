@@ -9,7 +9,8 @@ Scope: `@zakkster/lite-ring-buffer` (RingBuffer, ceilPow2). Sources: `git log`, 
 `ROADMAP.md`, `.handoff/HISTORY.md`, `.handoff/D/PLAN.md`, `.handoff/D2/PLAN.md` and the evidence
 dirs under them (all `.handoff/` is gitignored), the headers of `test/alloc.mjs`,
 `test/torture.mjs`, `test/count.mjs`, `.handoff/LU/PLAN.md` and its evidence dir, `.handoff/research/r1/` and
-`.handoff/PROPOSAL-r1.md` (R1 step 1), and the auto-memory note `alloc-gate-total-allocated-bytes`.
+`.handoff/PROPOSAL-r1.md` (R1 step 1), `.handoff/research/m1-twospan/`, and the auto-memory note
+`alloc-gate-total-allocated-bytes`.
 Numbers are copied from those sources as they state them; a number with no date / host / run
 count there carries none here either, and says so.
 
@@ -62,7 +63,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
    lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
-   derived from another measurement is not a measurement. *(A11, B4, C9, D4, D16)*
+   derived from another measurement is not a measurement. *(A11, B4, C9, D4, D16, D17)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim about allocation is a claim about every caller path.** "Zero allocation" holds only
@@ -78,7 +79,7 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 11. **A test-count floor is part of `npm test`.** An emptied, skipped, crashed or early-exiting test
     file must fail the run. *(C5, C6, C10, C15)*
 12. **Scope every measurement run explicitly.** A run that globs the package root also reads frozen
-    copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11, C15)*
+    copies under `.handoff/`; a tmp-leak check scopes its own TMPDIR. *(D5, C11, C15, D17)*
 13. **Every refusal names why, and a parked item names its unpark condition.** *(A1..A15)*
 
 Gate consequence: `npm run verify` = `npm test && npm run alloc && npm run torture && npm run
@@ -162,7 +163,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1, 3, 13.
 - **Gate.** `test/alloc.mjs` `CONTROL get(i), one 16 B box` is the deterministic tooth.
 
-### A7. PARKED (not refused): M1, M2, R4
+### A7. PARKED (not refused): M2, R4; M1 DROPPED 2026-11-15 (two-span forEach)
 
 - **What happened.** Parked 2026-11-10 (maintainer scope trim), each with an unpark condition.
   M1 two-span `forEach` / `copyTo` loop: adopt only on a STATISTICAL win (interleaved A/B at 1024
@@ -177,10 +178,23 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   dropped now." (maintainer, AskUserQuestion; options were A Drop it, B Keep it parked, C Measure it next).
   M1 stays PARKED until that research burst ends; the adopt rule (STATISTICAL win only) is unchanged. (This M1 is
   the ROADMAP Parked item, not the "M1 unpark unit" of A15 / C17 / D16.)
-- **Root cause.** No consumer or no measured win; "an engine detail is not a reason to ship code".
-- **Evidence.** ROADMAP.md "Parked"; b6a8310.
+  Update 2026-11-15 (M1 research burst): M1 DROPPED. The strict A/B on a `store` callback measured a LOSS on the
+  wrapped full ring for both two-span candidates (C1, C2) at 1024 and 8192 samples in both strict runs (REPORTED,
+  QUIET): row medians candidate / REF C1 1.526-1.553, C2 1.539-1.563; ONE `quiet-lock run --strict` hold, lock exit 0,
+  inner exits 0 0, 2026-11-15T16:19:54Z-16:23:32Z, load1 2.42 vs baseline 2.21, Apple M4 Pro, Node v26.8.2 / V8
+  14.6.202.34-node.28, HEAD 55b6ea9 / `RingBuffer.js` 90f7ad7c, K 21 x 3 compilations, 2 runs. C2's only WIN is h0
+  (0.921-0.926: its second loop never runs); C1 has no WIN row. The PRELIMINARY rung 1b run agreed. Maintainer ruling
+  (AskUserQuestion): "Strict re-run, then drop". The `copyTo` loop half (rung 3, "only if rung 1 showed a win") never
+  ran and is dropped unmeasured. The sum-callback runs were VOID (D17). Reopen only with a new mechanism that removes
+  the wrap-row cost, re-measured by the same strict A/B on a store callback with a must-fail control and a WIN row at
+  1024 and 8192 and no loss row. (M1 here is the Parked item, not the "M1 unpark unit".)
+- **Root cause.** M2, R4: no consumer. M1: a measured loss (a two-span walk costs more than the masked one on a
+  wrapped full ring), not only "no win"; "an engine detail is not a reason to ship code".
+- **Evidence.** ROADMAP.md "Parked"; b6a8310; `.handoff/research/m1-twospan/PROGRESS.md`;
+  `.handoff/research/m1-twospan/runs/strict/store-1/ab.md`; `.../runs/strict/store-2/ab.md`;
+  `.../runs/rung1b/store/ab.md` (PRELIMINARY).
 - **Law.** 13.
-- **Gate.** None.
+- **Gate.** None (STATISTICAL, by hand).
 
 ### A8. deopt-diff PARKED (unit LU) -> ADOPTED (LU2)
 
@@ -1272,3 +1286,42 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** None (STATISTICAL, by hand). A strict A/B verdict is ruled on row medians; every run is recorded, and docs
   cite each run with any slow compilation stated, each claim the lower of the runs. Reopen if a later strict run shows a
   slow compilation on the same row in two runs in a row (then it is a mode, not noise: trace it).
+
+### D17. A trivial accumulating callback measured per-compilation modes, not the walk (M1 research)
+
+- **What happened.** The M1 research burst (ROADMAP Parked M1, A7; not the "M1 unpark unit") timed `forEach` with a
+  sum callback (`ACC[0] += v`). The masked body ran in two per-compilation modes, ~1.79 vs ~0.68 ns per element
+  (`.handoff/research/m1-twospan/PROGRESS.md`, rung 1; all PRELIMINARY: host noisy, a LiteSignal `--jitless` node at
+  100-127% CPU). Identical bodies in one process read 0.38 or 2.6 of each other at 8192: rung 1 A/A (REF_AA / REF)
+  0.456 [0.382..2.566] h0 (`runs/rung1/ab.md`, K 21 x 3, exit 3 VOID); sum6 A/A 0.393 [0.382..1.001] h0 and 2.580
+  [1.004..2.641] wrap (`runs/rung1b/sum6/ab.md`, K 21 x 6, exit 3 VOID). At 1024 the candidates read C1/REF 0.379 h0 /
+  0.428 wrap (rung 1) and 0.380 / 0.430 (sum6): those "wins" were C1 reaching the fast mode where REF did not (REF in
+  the slow mode in 12 / 12 sum6 compilations at 1024). On a fast-vs-fast pairing C1/REF read 0.983 [0.975..0.994]
+  (8192 wrap, 4 of 6 compilations). The same walks on a `store` callback (`OUT[i] = v`) showed NO modes (REF / REF_AA
+  0.326-0.346 ns per element in all 12 compilations of `runs/rung1b/store/ab.md`, PRELIMINARY) and gave the strict
+  verdict recorded in A7.
+- **Root cause.** NOT found. Ruled out with evidence (`diag-sum/diag.md`, 6 compilations x 4 rows, optimized code of
+  all 120 driver compilations printed): accumulator in a register (ACC loaded, added and stored per element in BOTH
+  modes; the rung 1 hypothesis is refuted), OSR (no driver OSR-compiled), callback not inlined (no call in any inner
+  loop), deopt cycles (no driver bailout; forEach bailouts 0-36 do not track the mode), data address (`exp-align.mjs`,
+  `align-v2 --same-ring 1`: 1-2 of 16 identical drivers on the SAME data still run slow; 17 / 192 driver runs slow;
+  `align-gc` 6 / 96). `--no-turboshaft-loop-unrolling` made 36 / 36 masked-body (REF / REF_AA / SLOW) compilations run
+  fast (`diag-sum-nounroll`) but one `exp-align` driver read 3.10 ns without unrolling (`align-v1`): suggestive, not a
+  clean condition. Open: REF at 1024 is slow in 6 / 6 (rung 1), 12 / 12 (sum6), 12 / 12 (diag-sum) compilations but
+  6-12% at 1024 in `exp-align`; untested differences: one module per column, BOX in the interleaved warm-up, the B/op
+  lane. A per-code-address CPU effect is an untested hypothesis. Separately, a property of the harness (not tested
+  against the modes): the drivers hold the ring as a closure constant, so TurboFan folds the mask (`#0x3ff`) and bound
+  (`#0x400`), which is more specialised than a production caller.
+  - **Evidence.** `.handoff/research/m1-twospan/PROGRESS.md`; `runs/rung1/ab.md` (2026-11-15T07:47:03Z-07:50:29Z);
+  `runs/rung1b/sum6/ab.md` and `modes.md`; `runs/rung1b/diag-sum/diag.md`; `runs/rung1b/store/ab.md`
+  (2026-11-15T08:12:12Z-08:14:06Z); strict `runs/strict/store-1/ab.md` (2026-11-15T16:19:54Z-16:21:42Z) and
+  `runs/strict/store-2/ab.md` (2026-11-15T16:21:42Z-16:23:32Z). All sum-callback runs are PRELIMINARY. All: HEAD
+  55b6ea9 / RingBuffer.js sha256/8 90f7ad7c, Apple M4 Pro (12 cores), Node v26.8.2 / V8 14.6.202.34-node.28, one run
+  each; load1 1.80 -> 2.63 (rung 1), 2.24 -> 2.63 (diag-sum, 08:02:45Z-08:09:40Z), 2.33 -> 2.62 (sum6,
+  08:14:06Z-08:20:59Z), 2.43 -> 2.33 (store), baseline 2.21.
+- **Law.** 5 and 12. Lesson: a workload whose per-element cost can shift between two modes per compilation cannot
+  carry an A/B verdict; per-compilation medians plus an A/A twin catch it; use a store callback.
+- **Gate.** None (STATISTICAL harness self-check: the A/A twin and the per-compilation mode report in
+  `ab-foreach.mjs`, a research harness under `.handoff/research/m1-twospan/`, not in `npm test`). Reopen only with a
+  mechanism found for the modes and shown by a clean condition (a run where the mode flips with the condition and
+  with nothing else).

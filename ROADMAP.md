@@ -225,7 +225,7 @@ After 1.3.0 ships. One small burst: planner -> coder -> reviewer, then ONE run u
 - README gets one table with provenance (date, host, load, Node, run count).
 - Either backs README:179 "roughly 3-5x cheaper" with a REPORTED source, or that claim is removed.
 Not a demo: the maintainer ruled no demo is needed for this package (2026-11-12).
-Waits for the M1 research burst (RULING Q-M1-DEADLINE, 2026-11-15).
+The M1 research burst closed 2026-11-15 (M1 dropped, see Parked); B1 is next.
 
 ## Docs-only fillers
 
@@ -251,7 +251,7 @@ Sketch for that PROPOSAL (NOT ruled): ring r lives at `data[r * capacity .. (r +
 - Q-B3: do lite-canvas-graph / lite-stats-math take (bank, r) directly, or only a copied window?
 Gate: parity with N independent `RingBuffer`s under a random interleaved push stream, alloc lanes, torture.
 
-### M1 -- two-span `forEach` (and the `copyTo` loop)
+### M1 -- two-span `forEach` (and the `copyTo` loop) -- DROPPED 2026-11-15
 
 Splitting the oldest-first walk into its two contiguous halves drops the `& mask` per element; that V8 then
 hoists bounds checks is not measured, and per-element cost is likely dominated by the callback. Adopt only on
@@ -259,11 +259,35 @@ a STATISTICAL win (interleaved A/B at 1024 and 8192 samples, quiet host, must-fa
 run by the release after R3, record a null result here and drop it. An engine detail is not a reason to ship
 code.
 
-RULING Q-M1-DEADLINE 2026-11-15 (maintainer, AskUserQuestion, the post-1.5.1 housekeeping burst): 1.5.1 is the release after R3 and M1
-never ran; options were A "Drop it", B "Keep it parked", C "Measure it next"; ruled "C Measure it next", "Make it a research burst
-(spike-first ladder, its own session) before B1; nothing is dropped now." The deadline rule above is superseded
-by that research burst: it adopts M1 only on a STATISTICAL win as written above, else records the null result
-here and drops M1. (This M1 is the Parked item, not the "M1 unpark unit", the copyLast chain fix shipped in 1.5.1.)
+RULING Q-M1-DEADLINE 2026-11-15 (maintainer, AskUserQuestion, the post-1.5.1 housekeeping burst): 1.5.1 is the
+release after R3 and M1 never ran; options were A "Drop it", B "Keep it parked", C "Measure it next"; ruled "C Measure
+it next", "Make it a research burst (spike-first ladder, its own session) before B1; nothing is dropped now." The
+deadline rule above is superseded by that research burst: it adopts M1 only on a STATISTICAL win as written above,
+else records the null result here and drops M1. (This M1 is the Parked item, not the "M1 unpark unit", the copyLast
+chain fix shipped in 1.5.1.)
+
+DROPPED 2026-11-15. The research burst (spike-first ladder, `.handoff/research/m1-twospan/`) ran the same day and
+found a measured LOSS, not only no win. Two two-span candidates (C1, C2) were timed against the shipped masked
+`forEach` (REF) on a `store` callback (`OUT[i] = v`), K 21 x 3 compilations, on the wrapped full ring (`wrap` rows,
+the steady state of a telemetry ring and the only layout where the walk has two spans). Both strict runs (REPORTED,
+QUIET host): C1 and C2 are a LOSS at 1024 and 8192 samples in both runs. Row medians (candidate / REF): C1 1.526-1.553
+and C2 1.539-1.563 over the four wrap rows of the two runs. Provenance: ONE `quiet-lock run --strict` hold, lock exit
+0, inner exits 0 0 (2 runs), 2026-11-15T16:19:54Z-16:23:32Z, load1 2.42 at the gate vs baseline 2.21, no other node >=
+10% CPU, Apple M4 Pro (12 cores), Node v26.8.2 / V8 14.6.202.34-node.28, HEAD 55b6ea9 / `RingBuffer.js` sha256/8
+90f7ad7c; no slow compilation on any wrap row (every per-compilation median 1.513-1.570); the one slow compilation off
+the wrap rows is store-2 C2 1024 h0, 0.984 vs 0.920 / 0.920 (the row stays WIN). C2 reads a WIN only at h0
+(0.921-0.926), where its second loop never runs on a head-0 ring (single-span case), so C2 meets the WIN-row half of
+the bar (h0, both sizes, both strict runs) and fails it on its wrap LOSS rows (the bar also needs NO loss row). C1 has
+no WIN row (h0 LOSS 1.045-1.061). The earlier PRELIMINARY rung 1b run on the same callback agreed (wrap C1
+1.542-1.574, C2 1.556-1.563). The first rungs' sum-callback runs are VOID: the masked body ran in per-compilation
+modes, so no A/B on it carries a verdict (LEDGER D17). Rung 3 (the `copyTo` loop, "only if rung 1 showed a win") never
+ran: it has no premise, so the `copyTo` half is dropped with `forEach`, unmeasured. Maintainer ruling
+(AskUserQuestion, 2026-11-15): "Strict re-run, then drop". Sources: LEDGER A7 / D17 and
+`.handoff/research/m1-twospan/PROGRESS.md`.
+
+Reopen condition (law 13): a new mechanism that removes the wrap-row cost (a two-span walk no slower than the masked
+one on a full wrapped ring), re-measured by the same strict A/B (interleaved, K x 3 compilations, `quiet-lock run
+--strict`, must-fail control, A/A twin) on a store callback, with a WIN row at 1024 and 8192 and no loss row.
 
 ### M2 -- `forEachNewest(fn)` (newest-first walk)
 
@@ -272,6 +296,8 @@ when a consumer (lite-canvas-graph trails) asks for it.
 
 ## Rejected (with reasons)
 
+- **M1: two-span `forEach` / `copyTo` loop** (dropped 2026-11-15). A measured LOSS on the wrapped full ring in both
+  strict runs; see Parked and LEDGER A7 / D17.
 - **Deprecate in favour of lite-o1 `RingLog`** (rechecked 2026-11-10). See Positioning: Float64 storage,
   NaN throws, no bulk copy. Five dependents would lose `copyTo` and NaN gaps for no gain.
 - **`getOldest(index)`.** lite-o1 `RingLog.get(i)` is oldest-relative already, and here it is
