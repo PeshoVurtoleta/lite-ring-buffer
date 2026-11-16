@@ -7,8 +7,9 @@
 // echo "<content>" with nothing after the closing quote, the first line's content starting "SKIP ", the
 // content free of ", backtick, \ and $ except the whole substitutions in SKIP_SUBST; every line of any other
 // `|` block run step is one of the exact (trimmed) lines in BLOCK_LINES (the provenance block) or blank.
-// ciLegsSelfTest() pins both rules with string rows plus three end-to-end mutations of the live ci.yml, and
-// runs inside ciLegsAt(), so a red row fails every `npm run test:core` and the CLI.
+// ciLegsSelfTest() pins both rules with string rows (one per BLOCK_LINES and per SKIP_SUBST entry, so the
+// row count pins both lists) plus four end-to-end mutations of the live ci.yml, and runs inside ciLegsAt(),
+// so a red row fails every `npm run test:core` and the CLI.
 //
 // Asserts:
 //   - defaults is exactly run.shell: bash, and on is exactly bare push: + pull_request: triggers (no
@@ -432,10 +433,10 @@ const ST_BAD = [
   'node test/torture.mjs',
   'echo "commit: $(git rev-parse HEAD)"; npm test',
 ];
-// Rows: ST_SKIP_OK + BLOCK_LINES (pass) + 2 first-line rows + ST_BAD; + 3 end-to-end rows on a live ci.yml.
-// 32 pure rows; 35 with a live ci.yml.
-const ST_PURE_ROWS = 4 + 10 + 2 + 16;
-const ST_E2E_ROWS = 3;
+// Rows: ST_SKIP_OK + BLOCK_LINES (pass) + SKIP_SUBST (used by a live SKIP line, passes as a first line) +
+// 2 first-line rows + ST_BAD; + 4 end-to-end rows on a live ci.yml. 34 pure rows; 38 with a live ci.yml.
+const ST_PURE_ROWS = 4 + 10 + 2 + 2 + 16;
+const ST_E2E_ROWS = 4;
 
 function stOnce(text, from, to) {
   if (text.split(from).length !== 2) return null;
@@ -453,6 +454,12 @@ export function ciLegsSelfTest(liveText, verifyScript) {
     row('live SKIP line passes: ' + l.slice(0, 40), p);
   }
   for (const l of BLOCK_LINES) row('provenance line passes: ' + l.slice(0, 40), blockLineProblem('  ' + l + ' '));
+  // One row per SKIP_SUBST entry: an entry no live SKIP line uses is an unused widening of the echo grammar.
+  for (const sub of SKIP_SUBST) {
+    const used = ST_SKIP_OK.some(([l]) => l.indexOf(sub) !== -1);
+    row('SKIP_SUBST entry used + passes: ' + sub.slice(0, 40), used ? skipLineProblem('echo "SKIP x ' + sub + ' y"',
+      true) : 'no live SKIP line (ST_SKIP_OK) uses it');
+  }
   row('first line without SKIP', skipLineProblem('echo "total: x"', true) === null ? 'passed (want a finding)' : null);
   row('second line without SKIP', skipLineProblem('echo "total: x"', false));
   for (const b of ST_BAD) {
@@ -482,6 +489,12 @@ export function ciLegsSelfTest(liveText, verifyScript) {
     const uLine = u.length === 1 ? u[0] + '\n' : '\u0000';
     e2e('provenance block + "nvm use 18"',
       stOnce(liveText, uLine, uLine + uLine.replace('uname -a', 'nvm use 18')), 'run block: nvm use 18');
+    // `run:  ` (two spaces) parses as the scalar ' ', so the body reaches the empty-SKIP-body check (a `|`
+    // block of blank lines is refused earlier by the parser as an empty block scalar).
+    const t = liveText.split('\n').filter((l) => l.trim().startsWith('run: echo "SKIP torture '));
+    const tLine = t.length === 1 ? t[0] + '\n' : '\u0000';
+    const tBlank = t.length === 1 ? t[0].slice(0, t[0].indexOf('run: ')) + 'run:  \n' : '';
+    e2e('torture SKIP run body -> blank scalar', stOnce(liveText, tLine, tBlank), 'a SKIP step with an empty run body');
   }
   if (rows !== want) problems.push('ci-legs self-test: FAIL [row count] ran ' + rows + ' rows (want ' + want + ')');
   return { ok: problems.length === 0, rows, problems };
