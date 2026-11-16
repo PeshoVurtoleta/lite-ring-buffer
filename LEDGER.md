@@ -62,11 +62,11 @@ diff c2c28e0 1d6e368` empty). Not a conflict.
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for its own reason
    (test/count.mjs has none committed yet; its controls are scratch under `.handoff/archive/1.2.1/D2/mut/`), and every
    comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7, C8, C10, C11, C15, C17, C18, C19, C20,
-   D7, D18, D20, B10, A13, A15, B7, B8, B9, C12, C13, C14, C16, D8, D9, D10, D12, D14, D15)*
+   C21, C22, D7, D18, D20, B10, A13, A15, B7, B8, B9, C12, C13, C14, C16, D8, D9, D10, D12, D14, D15)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
    passed silently once; a missing tier output read exit 1, not NO-VERDICT.
-   *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18, C19, C20, D18, A12, B7, B9, C12, C13, D14, D15)*
+   *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18, C19, C20, C21, C22, D18, A12, B7, B9, C12, C13, D14, D15)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
    the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6, D19, B8, C12, D8)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
@@ -1159,6 +1159,98 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Gate.** `node test/bench/compare.mjs --self-test` (372 checks), `node test/bench/compare-gc.mjs --self-test`
   (212), `node test/core.mjs` (self-test 24/24 + the ci-legs check). Earlier 307 / 197 counts (C19, Q2) stay as
   history.
+
+### C21. Timeout orphaned the gc child; ci.yml SKIP / block lines were only loosely checked (post-1.5.7 fillers)
+
+- **What happened.** The post-1.5.7 fillers burst (commits bdea88a, 0eb8dd6 on 51b0e74) found three more holes.
+  Unit A: the `PROBE_TIMEOUT_MS` timer in `test/bench/compare.mjs` used a bare SIGKILL, which left the gc lane's own
+  child orphaned (a timed-out `compare-gc.mjs` could not forward the signal); at 51b0e74 `compare.mjs` parseOpts
+  was already canonical for `--K` while `compare-probe.mjs` and echoOf took `/^[0-9]+$/`. Unit B: `test/ci-legs.mjs`
+  let a SKIP line carry text after its echo that the old deny-list missed, and a non-SKIP `|` block run step carry
+  any line its deny-list missed (`nvm use 18` passed). Unit W: a rewrap of `test/ci-legs.mjs` and
+  `test/core.mjs` to 120 cols. Review round 1 then found the new oracles open on their own mutants: the runProbe
+  SOURCE row accepted a regression that sends SIGKILL first (its predicate did not pin the kill order); no row
+  isolated the `\` clause of the SKIP rule; nothing proved every SKIP line is checked (an unpinned per-line loop); the
+  `ci.yml` header comment was stale.
+- **Root cause.** A source / string oracle written to the author's paths, not to a mutant of its own judge: a
+  predicate that pinned what the fix contained but not the order that made it a fix, and per-line loops and clauses
+  with no row that fails when only they are removed (laws 1, 2).
+- **Fix.** Unit A: a pure `timeoutPlan()` derived from `signalPlan('SIGTERM')` forwards SIGTERM and sends SIGKILL
+  only after `SIGNAL_GRACE_MS` if the child has not exited, both timers cleared in `fin`; one `CANON_INT`
+  (`/^(?:0|[1-9][0-9]*)$/`) for `--K` on both sides (`compare.mjs` parseOpts + echoOf, `compare-probe.mjs`), one
+  source text, a source row fails a one-sided change. The round-1 predicate (grace timer armed before
+  `ch.kill(tp.forward)`, exactly 2 `ch.kill(` sites, no SIGKILL literal) replaced the weak one; the header line
+  "counts as crashed / VOID" was softened because nothing on the accept path read `timedOut`. Unit B: a SKIP line
+  is exactly one `echo "..."` with no `"`, backtick, `\` or `$` inside except the 2 whole substitutions in
+  `SKIP_SUBST`; every line of a non-SKIP `|` block run step is one of the exact 10 trimmed lines in `BLOCK_LINES`
+  (the provenance block) or blank;
+  the in-file `ciLegsSelfTest` (35 rows with a live `ci.yml`, 32 without, count-pinned) runs inside `ciLegsAt`, so
+  in `test:core` and the CLI; `ci.yml` comment lines 22-24 updated.
+- **Evidence.** Base 51b0e74 + commits bdea88a, 0eb8dd6; `.handoff/fp157/A/evidence/`, `.handoff/fp157/B/evidence/`,
+  reviews `.handoff/fp157/review-{A,B,W}/`, frozen before `.handoff/fp157/frozen-51b0e74/`, verify log
+  `.handoff/fp157/evidence/verify.log` (gitignored, maintainer checkout only). Unit A trial (timer patched to 4 s
+  for the gc lane, 1 run per copy, PRELIMINARY host; 2026-11-16T05:09:12Z, load1 5.32, Node v26.8.2; pass/fail,
+  not a timing; `.handoff/fp157/A/evidence/T1-timeout.txt`): 51b0e74 left a ppid-1 `compare-gc-child`; head left
+  none (gc lane exit 143 -> VOID, exit 1). Unit B frozen-vs-live: 51b0e74 passed both holes, head names both. Unit W:
+  acorn token and comment streams identical, 0 lines over 120. Hosted run 43811202859 (push of 0eb8dd6,
+  2026-11-16T05:35:14Z..05:39:52Z UTC) passed all 12 legs: core self-test 24/24 on Node 22 / 24 / 26 / 26.8.2 (23/23
+  + n/a feature guard on 18 / 20), core ci-legs "12 legs ... ok" on every leg, the first hosted run of the exact
+  SKIP / block rules and the ci-legs self-test. Closing local verify: exit 0, PRELIMINARY host (load1 5.31 vs
+  baseline 2.21; 1 run, 2026-11-16T05:26:21Z..05:28:07Z UTC), npm test 294/294, torture leak 0/0 gc 0/0 alloc 0.0
+  B/op, Node v26.8.2 arm64.
+- **Left open at 0eb8dd6.** (1) `compare.mjs` accepts a probe / gc lane that exited 0 with valid output after the
+  timeout fired (nothing on the accept path reads `timedOut`; the old SIGKILL code had the same race). (2) The
+  sibling bench probes `copyto-probe.mjs`, `pushbatch-probe.mjs`, `copylast-probe.mjs` (and their `*-ab.mjs`
+  drivers) still take `--K` with `/^[0-9]+$/`. (3) ci-legs has no row for the empty-SKIP-body branch (mutant M11
+  survives) and `SKIP_SUBST` is not count-pinned like `BLOCK_LINES`.
+- **Law.** 1, 2.
+- **Gate.** `node test/bench/compare.mjs --self-test` (383 checks), `node test/bench/compare-gc.mjs --self-test`
+  (212), `node test/core.mjs` (self-test 24/24 + ci-legs, whose in-file self-test is 35 rows with `ci.yml`). C20's
+  372 stays as history.
+
+### C22. C21's three leftovers closed; the timeout accept fix first pinned only its consumer (post-commit fillers)
+
+- **What happened.** The burst after 0eb8dd6 (working tree on 0eb8dd6, not yet committed) closed the three items C21
+  left open. (1) `test/bench/compare.mjs` accepted a probe or gc lane that exited 0 with valid output after the
+  timeout fired. Now a pure `ranClean(r)` (status 0, signal null, `timedOut === false`, error null) gates both
+  lanes: the probe accept is a pure `acceptRun(r, want)` (ranClean, then string stdout, JSON.parse, `acceptProbe`),
+  the gc lane accept is `acceptGc(run, mdExists)` = `ranClean(run) && mdExists === true`. The usage-error guards
+  became `r.status === 2 && r.timedOut === false` (probe) and `g.status === 2 && g.timedOut === false` (gc), so a
+  timed-out run is crashed / VOID even on exit 0 with valid output, or on exit 2. The header says "counts as
+  crashed / VOID" again. Self-test 383 -> 446 (+63 rows: ranClean / acceptGc / acceptRun tables, a `String(acceptRun)`
+  order row, a main-loop source row). (2) `test/bench/{copyto,pushbatch,copylast}-{ab,probe}.mjs` now carry the same
+  `const CANON_INT = /^(?:0|[1-9][0-9]*)$/;` line as `compare.mjs` on both sides; 0eb8dd6 accepted `--K 021`, head
+  exits 2. (3) `test/ci-legs.mjs` got a 4th end-to-end row: a live torture SKIP run with a blank scalar must give
+  the exact finding "a SKIP step with an empty run body" (mutant M11 passed 0eb8dd6 at 35/35, now red; it is
+  reachable only end to end: with no `ci.yml`, M11 survives because `checkCiLegs` does not run on that path), one
+  row per `SKIP_SUBST` entry, counted like `BLOCK_LINES`. Review round 1 then found the item-(1) fix pinned only the
+  consumer of `timedOut` / `error`: mutants in the producer (`runProbe`) survived at 446/446 and silently reopened
+  the hole: R2 `res({..., timedOut: false})`, R3 the `timedOut = true;` line dropped, R8 'error' resolved as
+  `fin(0, null, null)`; also R1 `combineExit(J.exit, 0)`.
+- **Root cause.** A fix that makes a field load-bearing must pin the field's producer, not only its consumer: the
+  accept predicate read `timedOut`, but nothing failed when the code that sets it stopped setting it (laws 1, 2).
+- **Fix.** The `runProbe` source row in `compare.mjs` now pins `timedOut = true;` (exactly once, before
+  `ch.kill(tp.forward)`), the `res(...)` line and both `ch.on` handlers; also pinned are
+  `const exitAll = combineExit(J.exit, gcExit);` and the two exit-2 guards. Each of the three bench drivers got +3
+  self-test rows (own source, probe source, pure table): copyto-ab 52 -> 55, pushbatch-ab 68 -> 71, copylast-ab
+  84 -> 87; reverting either side alone is red. ci-legs self-test 35 / 32 -> 38 / 34 (with / without `ci.yml`).
+- **Evidence.** Working tree on 0eb8dd6; `.handoff/fx0eb/U2/evidence/`, `.handoff/fx0eb/U3/evidence/` (and
+  `U3/evidence/fix1/`), `.handoff/fx0eb/U4/evidence/`, reviews `.handoff/fx0eb/review-{U2,U3,U4}/`, frozen before
+  `.handoff/fx0eb/frozen-0eb8dd6/` (gitignored, maintainer checkout only). Timed-out stub trial (stub probes trap
+  SIGTERM, exit 0 with valid output; `PROBE_TIMEOUT_MS` patched to 400 ms on scratch copies, `--smoke`, untimed,
+  1 run per copy, Node v26.8.2 / V8 14.6.202.34-node.28, Darwin 27.2.0 arm64 Apple M4 Pro x 12 cores; frozen run
+  2026-11-16T05:53:28.006Z .. 05:53:30.938Z, load1 2.48 at start / 2.45 at end (`e2e-frozen.log`); live run
+  05:53:30.999Z .. 05:53:33.936Z, load1 2.45 at start / 2.41 at end (`e2e-live.log`); pass/fail, not a timing;
+  `U3/evidence/fix1/e2e.log`): frozen 0eb8dd6 accepted 6/6 timed-out probes and the timed-out gc lane; head counts
+  6/6 crashed and the gc lane VOID.
+- **Left open.** Review nits, recorded and not fixed. (a) The `CANON_INT` source rows are text checks, so deliberate
+  sabotage (`CANON_INT.test(K) || true`, a decoy call, a shadowing block) survives; a probe spawn row per driver
+  would catch the probe side. (b) A truncated `SKIP_SUBST` entry (`'$(node --version'` without `)`) survives and
+  would admit `echo "SKIP $(node --version; npm run torture)"`; an `ST_BAD` row with that line would kill it.
+- **Law.** 1, 2.
+- **Gate.** `node test/bench/compare.mjs --self-test` (446 checks), `node test/bench/copyto-ab.mjs --self-test` (55),
+  `node test/bench/pushbatch-ab.mjs --self-test` (71), `node test/bench/copylast-ab.mjs --self-test` (87),
+  `node test/core.mjs` (ci-legs in-file self-test 38 rows with `ci.yml`). C21's 383 / 35 stay as history.
 
 ---
 
