@@ -8,11 +8,11 @@ Allocation figures below are bytes per call from `npm run alloc`
 over 5 steady-state windows, empty-loop baseline subtracted), Node 26.8.2
 arm64, 2026-10-14. Not timed, so host load does not affect them.
 
-## [Unreleased]
+## [1.5.7] - 2026-11-16
 
 ### Changed
 
-- `npm run test:core` now first runs a self-test of `test/core.mjs` (24 cases on fixture copies) and `test/ci-legs.mjs`, which checks `.github/workflows/ci.yml` (12 legs, one named SKIP step per skipped lane, `defaults` and `on` shape); either red exits 1 before any test file runs. The tier split moved to `test/core-tiers.json`; a count term below 2 (an emptied file) now fails, and a malformed `core-tiers.json` or `LRB_CORE_SELFTEST` value exits 2. Not yet run on hosted CI.
+- `npm run test:core` now first runs a self-test of `test/core.mjs` (24 cases on fixture copies) and `test/ci-legs.mjs`, which checks `.github/workflows/ci.yml` (12 legs, one named SKIP step per skipped lane, `defaults` and `on` shape); either red exits 1 before any test file runs. The tier split moved to `test/core-tiers.json`; a count term below 2 (an emptied file) now fails, and a malformed `core-tiers.json` or `LRB_CORE_SELFTEST` value exits 2. First hosted run 43794508993 (push of c651488, 2026-11-16T02:49Z UTC) passed all 12 legs: self-test 24/24 on Node 22 / 24 / 26 (23/23 + 1 n/a on 18 / 20), ci-legs ok on every leg.
 
 ### Docs
 
