@@ -19,9 +19,9 @@
 #   on every leg, npm run verify on the 26.8.2 legs only, and every leg that skips verify / alloc / torture has exactly
 #   one named SKIP step below ("core ci-legs: ... ok"). Editing the matrix, an if: or a SKIP step must keep it green;
 #   it checks the if: grammar (matrix.node == / != '<v>' joined by ||), keys, actions and one-line run commands;
-#   a SKIP step's lines must each start with echo " (the first echo "SKIP ") and hold no $(...npm...); a `|` run
-#   block is only deny-listed (npm other than `npm --version`, test/, .mjs, --test). Neither is fully parsed:
-#   `echo "SKIP x"; npm run torture` and a `|` line `nvm use 18` both pass, so review those by eye.
+#   a SKIP step's lines must each be exactly one echo "..." (the first echo "SKIP ..."), with no ", backtick,
+#   \ or $ inside the quotes but $(node --version) and the total_allocated_bytes probe; a `|` run block may only
+#   hold the exact lines of the provenance step below (BLOCK_LINES in test/ci-legs.mjs; a new one needs an entry).
 # Named SKIP steps (each prints its reason on the leg):
 # - npm test / npm run verify off 26.8.2: test/chainsize.test.js fails closed off Node v26.8.2 /
 #   V8 14.6.202.34-node.28 (Q-M1-GATE A); InliningTool / DeoptTool need bash, git and the pinned
