@@ -10,6 +10,14 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+### Changed
+
+- `npm run test:core` now first runs a self-test of `test/core.mjs` (24 cases on fixture copies) and `test/ci-legs.mjs`, which checks `.github/workflows/ci.yml` (12 legs, one named SKIP step per skipped lane, `defaults` and `on` shape); either red exits 1 before any test file runs. The tier split moved to `test/core-tiers.json`; a count term below 2 (an emptied file) now fails, and a malformed `core-tiers.json` or `LRB_CORE_SELFTEST` value exits 2. Not yet run on hosted CI.
+
+### Docs
+
+- README: the memory-per-window table caption said "bytes per instance" twice; it now says it once (wording only, no figure changed).
+
 ## [1.5.6] - 2026-11-16
 
 ### Added
