@@ -1071,7 +1071,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Fix.** New ARG_STATE `swapData` (warm both caches, replace `data` with a new full-length array of the same values,
   copy into the OLD data) and, after every ok outcome, a cache-parity assert `(rb._bufOf === rb.data) ===
   (ck._bufOf === ck.data)`; mutants MUT_CHK_STALE and MUT_CHK_NOCACHE on both copy rows.
-- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A11; `.handoff/q2/review-r1/` (gitignored
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/archive/1.5.6/q2/SPEC.md` A11; `.handoff/archive/1.5.6/q2/review-r1/` (gitignored
   paths, maintainer checkout only); round 2 APPROVED.
 - **Law.** 1, 2.
 - **Gate.** `node test/bench/compare.mjs --self-test` (307 checks in the strict-1 run): rows `copyto32 MUT_CHK_STALE
@@ -1397,7 +1397,7 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `npm run alloc` needs v26. Corrected in the docs (CHANGELOG [Unreleased]); D1 carries the same correction.
 - **Root cause.** The suite's gate was only ever run on the pinned engine (Node v26.8.2); a claim about other engines
   was written from the version a feature was expected in, not from a run (law 5).
-- **Evidence.** HEAD 834dab9 + the Q1 working tree; logs `.handoff/q1/evidence/` (core-v<version>.log per engine, 0c-n{20,22,24}-{1,2,3}.log, fix-torture-n18.log, ev-types-n18.log / ev-types-26.log, teeth.log, engine-features.log, review mutants review/*.out) of the 2026-11-16 local runs (test:core exit 0 on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3 /
+- **Evidence.** HEAD 834dab9 + the Q1 working tree; logs `.handoff/archive/1.5.6/q1/evidence/` (core-v<version>.log per engine, 0c-n{20,22,24}-{1,2,3}.log, fix-torture-n18.log, ev-types-n18.log / ev-types-26.log, teeth.log, engine-features.log, review mutants review/*.out) of the 2026-11-16 local runs (test:core exit 0 on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3 /
   v26.8.2; test:types exit 0 on v18.20.8 and v26.8.2; torture 3 runs each exit 0 on v20.20.2 / v22.23.5 / v24.22.3,
   exit 1 on v18.20.8, CONTROL lane profiler blind). The CI workflow itself has NOT run on GitHub: unverified there.
 - **Law.** 1, 2, 5.
@@ -1415,8 +1415,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   allocating `toArray` into a typed array looks small in it (SPEC A7).
 - **Root cause.** The counter (V8 `total_allocated_bytes`, D1 / law 4) is a heap counter; ArrayBuffer backing stores
   live off-heap.
-- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A7; REPORTED run
-  `.handoff/q2/strict-1/compare-gc.md` (2026-11-16T01:16Z, Node v26.8.2 / V8 14.6.202.34-node.28, QUIET, load1 2.81 at
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/archive/1.5.6/q2/SPEC.md` A7; REPORTED run
+  `.handoff/archive/1.5.6/q2/strict-1/compare-gc.md` (2026-11-16T01:16Z, Node v26.8.2 / V8 14.6.202.34-node.28, QUIET, load1 2.81 at
   the lock): MN_ARR 200.87 B/frame (n 64; 8 minor, 0 major) and 203.37 (n 1024; 7 minor, 9 major), CTL 201.29 (8 minor,
   0 major) and 203.14 (7 minor, 7 major). gitignored paths.
 - **Law.** 3, 4 (a B/op claim names its resolution and its scope: heap bytes).
@@ -1434,8 +1434,8 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   allocating RingBuffer pass as "net < 8" (SPEC A12).
 - **Root cause.** The measurement instrument has a nonzero, per-window-varying cost (law 5: the floor is measured, not
   assumed fixed); a subtraction with an unbounded subtrahend gates nothing (law 1).
-- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A10 / A12; `.handoff/q2/review-r1/`;
-  `.handoff/q2/strict-1/compare-gc.md` (RB floor 5.72 / 5.76, net -0.07 / -0.07 B/frame; other cells 0.18-5.77).
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/archive/1.5.6/q2/SPEC.md` A10 / A12; `.handoff/archive/1.5.6/q2/review-r1/`;
+  `.handoff/archive/1.5.6/q2/strict-1/compare-gc.md` (RB floor 5.72 / 5.76, net -0.07 / -0.07 B/frame; other cells 0.18-5.77).
   gitignored paths.
 - **Law.** 1, 4, 5.
 - **Gate.** `test/bench/compare-gc.mjs --self-test`: the RB cell is VOID unless 0 <= floor < 8 AND net < 8; rows
@@ -1448,11 +1448,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **What happened.** The mnemonist column's copy rows read 511.96 B/op at n 32 and 16383.12 B/op at n 1024 for
   `forEach` with a hoisted store callback. Review proved the cause: its loop calls `callback.call(scope, item, i,
   this)` and that call boxes the float; a direct loop over its items with the same callback read 0 B (review r1 scratch,
-  `.handoff/q2/review-r1/VERDICTS.md`; not a strict-1 figure); the GC lane's MN_EACH cells read 1025.42 B/frame at n 64,
+  `.handoff/archive/1.5.6/q2/review-r1/VERDICTS.md`; not a strict-1 figure); the GC lane's MN_EACH cells read 1025.42 B/frame at n 64,
   16385.00 at n 1024 (40 / 625 minor GCs). `toArray()` allocates a new array
   per call (MN_ARR / MN_TA).
 - **Root cause.** A non-inlined call boundary on a fractional value (the zero-box rule), in the competitor, not here.
-- **Evidence.** `.handoff/q2/strict-1/compare.md` (copyto32 / copyto1024 MN rows) and `compare-gc.md` (MN_EACH, MN_ARR
+- **Evidence.** `.handoff/archive/1.5.6/q2/strict-1/compare.md` (copyto32 / copyto1024 MN rows) and `compare-gc.md` (MN_EACH, MN_ARR
   rows); one strict QUIET run, 2026-11-16T01:13Z..01:16Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28,
   load1 2.81 at start / 3.75 at end, K 21 x 3 compilations; mnemonist 0.40.8 (sha256/8 029daecd). gitignored paths.
 - **Law.** 5 (a REPORTED figure of a competitor, with provenance, worded as a measurement).

@@ -6,7 +6,7 @@
 //        --rb FILE --rb-sha8 HEX --o1 FILE --o1-sha8 HEX --mn FILE --mn-sha8 HEX
 //        [--control alloc|leak|mem] [--smoke]
 //
-// ---- FIXED CONTRACT (copy: .handoff/q2/B/child-schema.txt; change only with a report) -----------------
+// ---- FIXED CONTRACT (copy: .handoff/archive/1.5.6/q2/B/child-schema.txt; change only with a report) -----------------
 // Exit: 0 = ran, exactly ONE JSON line on stdout (the cell; the driver judges it). 1 = precondition failed
 //   (no --expose-gc, v8 total_allocated_bytes missing / not finite, a file missing, a sha256/8 mismatch,
 //   mnCheck(<pkg root>/node_modules) not ok, --mn not the createRequire-resolved mnemonist/circular-buffer.js,
