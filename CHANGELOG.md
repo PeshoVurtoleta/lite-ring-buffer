@@ -10,6 +10,8 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ## [Unreleased]
 
+## [1.5.6] - 2026-11-16
+
 ### Added
 
 - `npm run test:core` (`test/core.mjs`, not in `verify`): the portable core lane. The 10 base test files (206 tests) run on Node 18 / 20 / 22 / 24 / 26, each in its own `--test-reporter=tap` child, count-gated against `test/count.mjs`; the feature tier (`qa-r1`, `qa-r3`, `qa-m1`: 41 tests) runs where `ArrayBuffer#transfer`, `#resize` and `SharedArrayBuffer#grow` exist, else a named SKIP (a Node >= 22 missing one fails).
