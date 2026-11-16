@@ -1150,10 +1150,11 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   (signalPlan), canonical-integer parseOpts and a `--self-test` that takes no other argument, a pure floor predicate
   rbFloorOk with direct rows. Core: a 24-case self-test on fixture copies, `test/ci-legs.mjs`, the tier split in
   `test/core-tiers.json`, every count term >= 2, new exit 2 causes; ci-legs r2 pins `defaults` and `on`.
-- **Evidence.** Base 1d91441 + the working tree; `.handoff/fillers/u1/evidence/`, `.handoff/fillers/u3/evidence/`,
-  `.handoff/fillers/u3/review/` (gitignored, maintainer checkout only); frozen before
-  `.handoff/fillers/frozen-8965b17/`. First hosted run 43794508993 (push of c651488, 2026-11-16T02:49Z UTC) passed all
-  12 legs: self-test 24/24 on Node 22 / 24 / 26 (23/23 + 1 n/a on 18 / 20), ci-legs ok on every leg.
+- **Evidence.** Base 1d91441 + the working tree; `.handoff/archive/1.5.7/fillers/u1/evidence/`,
+  `.handoff/archive/1.5.7/fillers/u3/evidence/`, `.handoff/archive/1.5.7/fillers/u3/review/` (gitignored, maintainer
+  checkout only); frozen before `.handoff/archive/1.5.7/fillers/frozen-8965b17/`. First hosted run 43794508993 (push of
+  c651488, 2026-11-16T02:49Z UTC) passed all 12 legs: self-test 24/24 on Node 22 / 24 / 26 (23/23 + 1 n/a on 18 / 20),
+  ci-legs ok on every leg.
 - **Law.** 1, 2.
 - **Gate.** `node test/bench/compare.mjs --self-test` (372 checks), `node test/bench/compare-gc.mjs --self-test`
   (212), `node test/core.mjs` (self-test 24/24 + the ci-legs check). Earlier 307 / 197 counts (C19, Q2) stay as
