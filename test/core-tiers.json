@@ -1,0 +1,15 @@
+{
+  "base": [
+    "test/RingBuffer.test.js", "test/copyto.test.js", "test/copyto-r1b.test.js", "test/audit-fix.test.js",
+    "test/mutant-kills.test.js", "test/pushbatch.test.js", "test/qa-r2.test.js", "test/copylast.test.js",
+    "test/copylast-parity.test.js", "test/copylast-hooks.test.js"
+  ],
+  "feature": ["test/qa-r1.test.js", "test/qa-r3.test.js", "test/qa-m1.test.js"],
+  "excluded": {
+    "test/InliningTool.test.js": "needs bash, git and the exact-pinned @zakkster/lite-utils 1.0.0 (Node >= 22)",
+    "test/DeoptTool.test.js": "needs bash, git and the exact-pinned @zakkster/lite-utils 1.0.0 (Node >= 22)",
+    "test/chainsize.test.js": "fails closed off Node v26.8.2 / V8 14.6.202.34-node.28 (Q-M1-GATE A)"
+  },
+  "baseTotal": 206,
+  "featureTotal": 41
+}
