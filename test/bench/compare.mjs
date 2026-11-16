@@ -19,9 +19,10 @@
 // SIGNAL_GRACE_MS for the child's exit, SIGKILLs it after that (or on a second signal), then exits 130 / 143 and the
 // dir is removed. A probe / gc lane past PROBE_TIMEOUT_MS takes the same forward / wait / SIGKILL path (timeoutPlan,
 // pure, self-tested: SIGTERM forwarded, SIGKILL after SIGNAL_GRACE_MS if it has not exited), so a timed-out gc lane
-// also kills ITS child. A timed-out probe / gc lane is signalled; one that the signal ends counts as crashed / VOID
-// ("timed out" on stderr). RingDeque = the installed
-// devDependency @zakkster/lite-o1 (>= 1.11.3), resolved here and passed to the probe with its sha256/8
+// also kills ITS child. A timed-out probe / gc lane counts as crashed / VOID ("timed out" on stderr), even if it
+// exits 0 with valid output or exits 2: ranClean (pure, self-tested) requires timedOut === false before any output
+// is read, and only a NOT timed-out exit 2 is a usage error. RingDeque = the installed devDependency
+// @zakkster/lite-o1 (>= 1.11.3), resolved here and passed to the probe with its sha256/8
 // (the probe fails closed on a mismatch); MN / MN_TA = the devDependency mnemonist, EXACT 0.40.8 (mn-pin.mjs):
 // circular-buffer.js is resolved with createRequire from ROOT/package.json (its subpaths are require-only),
 // never required here, and checked by mnCheck(ROOT/node_modules) (name, version, combined digest ===
@@ -45,19 +46,22 @@
 // GC lane (HOOK H, SPEC A2): after the probes, one `node test/bench/compare-gc.mjs --out DIR --rb <staged RB>
 // --rb-sha8 .. --o1 .. --o1-sha8 .. --mn .. --mn-sha8 .. [--smoke]` (DIR = this run's --out dir, created empty
 // here, so it never holds an old compare-gc.{md,json}; the gc lane gets the same staged HEAD RingBuffer the
-// probes get; --control is not passed). Its exit 2 = die(2); it counts VALID (acceptGc) only on status 0, no
-// signal and DIR/compare-gc.md present. DIR/compare-gc.md is appended after the tables; compare.json gets
-// gc: {exit (its raw status), file (compare-gc.md path or null)}. compare-gc.mjs's own self-test is a separate
-// entry point, not run by --self-test here.
+// probes get; --control is not passed). Its exit 2 = die(2) unless it timed out; it counts VALID (acceptGc)
+// only when it ran clean (ranClean: status 0, no signal, not timed out, no spawn error) and DIR/compare-gc.md is
+// present.
+// DIR/compare-gc.md is appended after the tables; compare.json gets gc: {exit (its raw status), file
+// (compare-gc.md path or null)}. compare-gc.mjs's own self-test is a separate entry point, not run by --self-test here.
 // Exit (exitAll, pure: combineExit(judge exit, gc lane)): 0 = every row VALID and the gc lane VALID on a QUIET
-// host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID row, a VOID gc lane (or a red self-test);
-// 2 = usage / git / staging error or host not quiet.
+// host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID row or crashed / timed-out probe, a VOID gc lane
+// (or a red self-test);
+// 2 = usage / git / staging error (incl. a probe / gc lane exit 2 that did not time out) or host not quiet.
 // The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases (incl.
-// parseOpts, signalPlan and timeoutPlan rows);
-// every real run runs them first, before any spawn. The probe argv (buildArgs), the expected echo (buildWant),
-// the probe's echo of an argv (echoOf) and the probe-output accept check (acceptProbe: row, the three sha256/8,
-// control, smoke, K; every want sha8 must be 8 lowercase hex) are pure and self-tested end to end; a real run
-// re-checks that wiring on its real pins (each single-field flip rejected) before any probe spawn.
+// parseOpts, signalPlan, timeoutPlan, ranClean, acceptRun and acceptGc rows, plus source rows pinning the main loop's
+// accept lines); every real run runs them first, before any spawn. The probe argv (buildArgs), the expected echo
+// (buildWant), the probe's echo of an argv (echoOf), the run accept (acceptRun: ranClean first, then JSON.parse and
+// acceptProbe) and the probe-output accept check (acceptProbe: row, the three sha256/8, control, smoke, K; every want
+// sha8 must be 8 lowercase hex) are pure and self-tested end to end; a real run re-checks the argv / acceptProbe
+// wiring on its real pins (each single-field flip rejected) before any probe spawn.
 // Writes DIR/compare.json and DIR/compare.md; DIR = --out (new or empty), else ROOT/.handoff/bench-compare/compare-<ISO>/.
 // Test tooling only: not shipped.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
@@ -274,9 +278,23 @@ function acceptProbe(j, want) {
         j && j.row === want.row && j.sha8 && j.sha8.rb === want.rb && j.sha8.o1 === want.o1 && j.sha8.mn === want.mn &&
         j.control === want.control && j.smoke === want.smoke && j.K === Number(want.K));
 }
-// gc lane accept (pure): 0 only on status 0, no signal (null) and compare-gc.md present (=== true); else 1
-function acceptGc(status, signal, mdExists) {
-    return status === 0 && signal === null && mdExists === true ? 0 : 1;
+// "the child ran clean" (pure, fail closed) on a runProbe result: status 0, signal null, timedOut === false and
+// error null. An undefined / null / 'false' / 0 timedOut is unverified -> not clean. Read BEFORE the child's output.
+function ranClean(r) {
+    return !!r && typeof r === 'object' && r.status === 0 && r.signal === null && r.timedOut === false &&
+        r.error === null;
+}
+// probe run accept (pure): the parsed probe JSON only if ranClean(r), stdout parses and acceptProbe(j, want); else null
+function acceptRun(r, want) {
+    if (!ranClean(r) || typeof r.stdout !== 'string') return null;
+    let j;
+    try { j = JSON.parse(r.stdout); } catch { return null; }
+    return acceptProbe(j, want) === true ? j : null;
+}
+// gc lane accept (pure): 0 only on ranClean(run) (status 0, no signal, not timed out, no error) and compare-gc.md
+// present (=== true); else 1
+function acceptGc(run, mdExists) {
+    return ranClean(run) && mdExists === true ? 0 : 1;
 }
 // overall exit (pure): judge exit 0 / 2 survives only with a gc lane 0; anything else (a VOID row, a VOID gc
 // lane, a non-0/1/2 value, NaN, null) is 1. A judge 2 (host not quiet) with a VALID gc lane stays 2.
@@ -577,10 +595,73 @@ function selfTest() {
         [0, undefined, 1], [0, 2, 1], [null, 0, 1], [undefined, 0, 1], [NaN, 0, 1], [3, 0, 1], ['0', 0, 1]]) {
         c('combineExit judge ' + String(jx) + ' gc ' + String(gx) + ' -> ' + want, want, () => ({ exit: combineExit(jx, gx) }));
     }
+    // a runProbe result (RUN() = ran clean); the acceptGc status / signal / md rows run with timedOut false, error null
+    const RUN = (o = {}) => Object.assign({ status: 0, signal: null, stdout: '', stderr: '', error: null,
+        timedOut: false }, o);
     for (const [st, sg, md, want] of [[0, null, true, 0], [1, null, true, 1], [0, 'SIGKILL', true, 1], [0, null, false, 1], [null, null, true, 1],
         [null, 'SIGTERM', true, 1], [0, undefined, true, 1], [0, null, 1, 1], [0, null, undefined, 1], ['0', null, true, 1], [2, null, true, 1]]) {
-        c('acceptGc status ' + String(st) + ' signal ' + String(sg) + ' md ' + String(md) + ' -> ' + want, want, () => ({ exit: acceptGc(st, sg, md) }));
+        c('acceptGc status ' + String(st) + ' signal ' + String(sg) + ' md ' + String(md) + ' -> ' + want, want,
+            () => ({ exit: acceptGc(RUN({ status: st, signal: sg }), md) }));
     }
+    // "ran clean" (ranClean, pure, fail closed): every field of a runProbe result checked; timedOut must be === false
+    const RC = [['clean', RUN(), 0], ['timedOut true', RUN({ timedOut: true }), 1],
+        ['timedOut undefined', RUN({ timedOut: undefined }), 1],
+        ['timedOut missing', (() => { const r = RUN(); delete r.timedOut; return r; })(), 1],
+        ['timedOut null', RUN({ timedOut: null }), 1], ["timedOut 'false'", RUN({ timedOut: 'false' }), 1],
+        ['timedOut 0', RUN({ timedOut: 0 }), 1], ['timedOut NaN', RUN({ timedOut: NaN }), 1],
+        ['status 1', RUN({ status: 1 }), 1], ['status null', RUN({ status: null }), 1],
+        ["status '0'", RUN({ status: '0' }), 1], ['status NaN', RUN({ status: NaN }), 1],
+        ["signal 'SIGTERM'", RUN({ signal: 'SIGTERM' }), 1], ['signal undefined', RUN({ signal: undefined }), 1],
+        ['error set', RUN({ error: new Error('spawn ENOENT') }), 1],
+        ['error undefined', RUN({ error: undefined }), 1], ['run null', null, 1], ['run undefined', undefined, 1],
+        ["run 'ok'", 'ok', 1]];
+    for (const [nm, r, want] of RC) c('ranClean ' + nm + ' -> ' + want, want, ok0(() => ranClean(r) === true));
+    for (const [nm, r, want] of RC) {
+        c('acceptGc ' + nm + ' md true -> ' + want, want, () => ({ exit: acceptGc(r, true) }));
+    }
+    c('acceptGc clean md false -> 1', 1, () => ({ exit: acceptGc(RUN(), false) }));
+    // probe run accept (acceptRun, pure): ranClean BEFORE JSON.parse / acceptProbe; a timed-out clean exit is rejected
+    const WR = buildWant('push', PINS, { K: '21', control: '', smoke: false });
+    const OUTJ = JSON.stringify({ row: 'push', sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc3330' }, control: '',
+        smoke: false, K: 21 });
+    const arOk = (J) => J.j !== null && typeof J.j === 'object' && J.j.row === 'push' && J.j.K === 21;
+    const ar = (name, want, r, w = WR) => c('acceptRun ' + name + ' -> ' + want, want, () => {
+        const j = acceptRun(r, w);
+        return { exit: j === null ? 1 : 0, j };
+    }, want === 0 ? arOk : (J) => J.j === null);
+    ar('clean, valid probe JSON', 0, RUN({ stdout: OUTJ }));
+    for (const [nm, r, want] of RC) {
+        if (want === 1 && r && typeof r === 'object') {
+            ar(nm + ', valid probe JSON', 1, Object.assign({}, r, { stdout: OUTJ }));
+        }
+    }
+    ar('clean, stdout not JSON', 1, RUN({ stdout: 'x' + OUTJ }));
+    ar('clean, stdout empty', 1, RUN({ stdout: '' }));
+    ar('clean, stdout a Buffer', 1, RUN({ stdout: Buffer.from(OUTJ) }));
+    ar('clean, stdout null', 1, RUN({ stdout: null }));
+    ar('clean, wrong row', 1, RUN({ stdout: OUTJ }), buildWant('get', PINS, { K: '21', control: '', smoke: false }));
+    ar('clean, want null', 1, RUN({ stdout: OUTJ }), null);
+    c('acceptRun source: ranClean(r) before JSON.parse, acceptProbe on the parsed j', 0, ok0(() => {
+        const s = String(acceptRun);
+        return s.includes('if (!ranClean(r) ') && s.indexOf('ranClean(r)') < s.indexOf('JSON.parse(') &&
+            s.split('JSON.parse(').length === 2 && s.includes('acceptProbe(j, want) === true ? j : null');
+    }));
+    // main-loop wiring (top-level code, read from this file's own source): the probe accept is acceptRun (no
+    // JSON.parse, acceptProbe or status test of its own), the gc lane accept is acceptGc on the WHOLE run object
+    c('main loop source: probe accept = acceptRun, gc lane accept = acceptGc(g, ..)', 0, ok0(() => {
+        const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+        const a = src.indexOf('\nlet crashed = 0;\n'), b = src.indexOf('\n// ---- judge + write');
+        if (!(a > 0 && b > a) || src.split('\nlet crashed = 0;\n').length !== 2) return false;
+        const loop = src.slice(a, b);
+        return loop.split('const j = acceptRun(r, buildWant(row, PINS, CFG));').length === 2 &&
+            loop.includes('if (j !== null) {') && loop.split('const gcExit = acceptGc(g, gcMdExists);').length === 2 &&
+            loop.split('acceptGc(').length === 2 && loop.split('acceptRun(').length === 2 &&
+            !loop.includes('JSON.parse') && !loop.includes('acceptProbe(') && !loop.includes('ranClean(') &&
+            !/\.status === 0/.test(loop) && loop.split('.status === 2').length === 3 &&
+            loop.split("if (r.status === 2 && r.timedOut === false) die('probe usage error (").length === 2 &&
+            loop.split("\nif (g.status === 2 && g.timedOut === false) die('gc lane usage error: ").length === 2 &&
+            src.split('\nconst exitAll = combineExit(J.exit, gcExit);\n').length === 2;
+    }));
     // CLI (parseOpts, pure): exit 2 = { err }; every value checked before the --self-test exit; canonical integers only
     const po = (name, want, argv, pred) => c('opts ' + name + ' -> ' + want, want, () => { const r = parseOpts(argv); return { exit: r.err ? 2 : 0, r }; },
         pred ? (J) => pred(J.r) === true : undefined);
@@ -637,7 +718,12 @@ function selfTest() {
                 /clearTimeout\(timer\)/.test(src) && /clearTimeout\(graceTimer\)/.test(src) &&
                 src.includes('if (ch.exitCode === null && ch.signalCode === null) ch.kill(tp.fallback);') &&
                 src.split('ch.kill(').length === 3 &&
-                src.indexOf('}, tp.graceMs);') < src.indexOf('ch.kill(tp.forward);');
+                src.indexOf('}, tp.graceMs);') < src.indexOf('ch.kill(tp.forward);') &&
+                src.split('timedOut = true;').length === 2 &&
+                src.indexOf('timedOut = true;') < src.indexOf('ch.kill(tp.forward);') &&
+                src.includes('res({ status, signal, stdout: out, stderr: err, error, timedOut });') &&
+                src.includes("ch.on('error', (e) => fin(null, null, e));") &&
+                src.includes("ch.on('close', (status, signal) => fin(status, signal, null));");
         });
     // --K is one canonical-integer rule in compare (parseOpts, echoOf) and the probe (CANON_INT, same text)
     const echoK = (k) => echoOf(buildArgs('push', PINS, { K: k, control: '', smoke: false }));
@@ -905,12 +991,9 @@ for (let cpi = 0; cpi < COMP; cpi++) {
         const row = ROW_LIST[i];
         const r = await runProbe(buildArgs(row, PINS, CFG));
         const tag = row + ' comp ' + (cpi + 1);
-        if (r.status === 2) die('probe usage error (' + tag + '): ' + String(r.stderr).trim());
-        let j = null;
-        if (r.status === 0 && r.signal === null) {
-            try { j = JSON.parse(r.stdout); } catch { j = null; }
-        }
-        if (acceptProbe(j, buildWant(row, PINS, CFG))) {
+        if (r.status === 2 && r.timedOut === false) die('probe usage error (' + tag + '): ' + String(r.stderr).trim());
+        const j = acceptRun(r, buildWant(row, PINS, CFG));
+        if (j !== null) {
             runs[i].push(j);
             process.stdout.write('ran ' + tag + '\n');
         } else {
@@ -924,10 +1007,10 @@ for (let cpi = 0; cpi < COMP; cpi++) {
 // GC lane (HOOK H): same staged RB / pins, OUT = this run's dir (created empty above)
 const gcArgs = [GC, '--out', OUT, '--rb', rbPath, '--rb-sha8', rbSha8, '--o1', o1Path, '--o1-sha8', o1Sha8, '--mn', mnPath, '--mn-sha8', mnSha8].concat(SMOKE ? ['--smoke'] : []);
 const g = await runProbe(gcArgs);
-if (g.status === 2) die('gc lane usage error: ' + String(g.stderr).trim());
+if (g.status === 2 && g.timedOut === false) die('gc lane usage error: ' + String(g.stderr).trim());
 const GC_MD = join(OUT, 'compare-gc.md');
 const gcMdExists = isFile(GC_MD);
-const gcExit = acceptGc(g.status, g.signal, gcMdExists);
+const gcExit = acceptGc(g, gcMdExists);
 process.stdout.write('ran gc lane: status ' + g.status + ' signal ' + g.signal + (gcMdExists ? '' : ' (no compare-gc.md)') + '\n');
 if (gcExit !== 0) {
     const tmo = g.timedOut ? ' (timed out after ' + PROBE_TIMEOUT_MS + ' ms)' : '';
@@ -940,7 +1023,11 @@ const T1 = new Date();
 // ---- judge + write ------------------------------------------------------------------------------------
 const J = judge({ rows: ROW_LIST, runs, comp: COMP, smoke: SMOKE, host, crashed });
 const exitAll = combineExit(J.exit, gcExit);
-if (gcExit !== 0) J.why.push('VOID gc-lane: exit ' + g.status + (g.signal ? ' signal ' + g.signal : '') + (gcMdExists ? '' : '; compare-gc.md missing'));
+if (gcExit !== 0) {
+    J.why.push('VOID gc-lane: exit ' + g.status + (g.signal ? ' signal ' + g.signal : '') +
+        (gcMdExists ? '' : '; compare-gc.md missing') +
+        (g.timedOut ? '; timed out after ' + PROBE_TIMEOUT_MS + ' ms' : ''));
+}
 const tier = SMOKE ? 'SMOKE: not quotable' : exitAll === 0 ? 'REPORTED (QUIET host, every row VALID, gc lane VALID)' : exitAll === 2 ? 'PRELIMINARY / NO VERDICT (host not quiet)' :
     J.exit === 1 ? 'VOID rows present' : 'gc lane VOID';
 const p0 = runs.find((r) => r.length)?.[0] || {};
