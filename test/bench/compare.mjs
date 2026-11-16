@@ -17,7 +17,10 @@
 // so a signal is handled between and during them). On SIGINT / SIGTERM (signalPlan, pure, self-tested) the signal is
 // FORWARDED to the running child (so the gc lane's own handler runs and kills ITS child), compare waits up to
 // SIGNAL_GRACE_MS for the child's exit, SIGKILLs it after that (or on a second signal), then exits 130 / 143 and the
-// dir is removed; RingDeque = the installed
+// dir is removed. A probe / gc lane past PROBE_TIMEOUT_MS takes the same forward / wait / SIGKILL path (timeoutPlan,
+// pure, self-tested: SIGTERM forwarded, SIGKILL after SIGNAL_GRACE_MS if it has not exited), so a timed-out gc lane
+// also kills ITS child. A timed-out probe / gc lane is signalled; one that the signal ends counts as crashed / VOID
+// ("timed out" on stderr). RingDeque = the installed
 // devDependency @zakkster/lite-o1 (>= 1.11.3), resolved here and passed to the probe with its sha256/8
 // (the probe fails closed on a mismatch); MN / MN_TA = the devDependency mnemonist, EXACT 0.40.8 (mn-pin.mjs):
 // circular-buffer.js is resolved with createRequire from ROOT/package.json (its subpaths are require-only),
@@ -50,7 +53,7 @@
 // host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID row, a VOID gc lane (or a red self-test);
 // 2 = usage / git / staging error or host not quiet.
 // The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases (incl.
-// parseOpts and signalPlan rows);
+// parseOpts, signalPlan and timeoutPlan rows);
 // every real run runs them first, before any spawn. The probe argv (buildArgs), the expected echo (buildWant),
 // the probe's echo of an argv (echoOf) and the probe-output accept check (acceptProbe: row, the three sha256/8,
 // control, smoke, K; every want sha8 must be 8 lowercase hex) are pure and self-tested end to end; a real run
@@ -309,7 +312,7 @@ function echoOf(args) {
     }
     for (const k of ['--rb', '--rb-sha8', '--o1', '--o1-sha8', '--mn', '--mn-sha8', '--row']) if (!(k in o)) return null;
     const ks = o['--K'] ?? '21';
-    if (!/^[0-9]+$/.test(ks)) return null;
+    if (!CANON_INT.test(ks)) return null;
     return { row: o['--row'], sha8: { rb: o['--rb-sha8'], o1: o['--o1-sha8'], mn: o['--mn-sha8'] }, control: o['--control'] ?? '', smoke: o['--smoke'] === true, K: Number(ks) };
 }
 // end-to-end wiring (pure): for every row the real argv's echo is accepted against the real want, and each
@@ -620,6 +623,41 @@ function selfTest() {
     });
     c('signalPlan never forwards SIGKILL first', 0, () => ({ exit: 0 }), () => ['SIGINT', 'SIGTERM'].every((sg) => signalPlan(sg).forward !== 'SIGKILL'));
     c('signalPlan other / bad -> null', 0, () => ({ exit: 0 }), () => [undefined, null, '', 'SIGHUP', 'SIGKILL', 'sigterm', 15].every((sg) => signalPlan(sg) === null));
+    // probe / gc lane timeout (timeoutPlan, pure): the SIGTERM path's forward / grace / fallback, never SIGKILL first
+    c('timeoutPlan = signalPlan(SIGTERM) forward, SIGKILL fallback, finite grace', 0, () => ({ exit: 0 }), () => {
+        const p = timeoutPlan(), s = signalPlan('SIGTERM');
+        return p !== null && typeof p === 'object' && p.forward === s.forward && p.forward !== 'SIGKILL' &&
+            p.fallback === 'SIGKILL' && p.fallback === s.fallback && Number.isFinite(p.graceMs) && p.graceMs > 0 &&
+            p.graceMs === s.graceMs;
+    });
+    c('runProbe source: timer via timeoutPlan, no SIGKILL literal, both timers cleared in fin', 0, () => ({ exit: 0 }),
+        () => {
+            const src = String(runProbe);
+            return src.includes('timeoutPlan()') && !src.includes("'SIGKILL'") && !src.includes('"SIGKILL"') &&
+                /clearTimeout\(timer\)/.test(src) && /clearTimeout\(graceTimer\)/.test(src) &&
+                src.includes('if (ch.exitCode === null && ch.signalCode === null) ch.kill(tp.fallback);') &&
+                src.split('ch.kill(').length === 3 &&
+                src.indexOf('}, tp.graceMs);') < src.indexOf('ch.kill(tp.forward);');
+        });
+    // --K is one canonical-integer rule in compare (parseOpts, echoOf) and the probe (CANON_INT, same text)
+    const echoK = (k) => echoOf(buildArgs('push', PINS, { K: k, control: '', smoke: false }));
+    for (const k of ['0021', '05', '021', '+5']) {
+        c('echoOf --K ' + JSON.stringify(k) + ' -> null', 0, ok0(() => echoK(k) === null));
+    }
+    for (const k of ['5', '21', '1001']) {
+        c('echoOf --K ' + k + ' -> K ' + k, 0, ok0(() => {
+            const e = echoK(k);
+            return e !== null && e.K === Number(k);
+        }));
+    }
+    c('echoOf uses CANON_INT, no /^[0-9]+$/', 0,
+        ok0(() => String(echoOf).includes('CANON_INT.test(ks)') && !String(echoOf).includes('[0-9]+$')));
+    c('compare-probe.mjs --K: same CANON_INT line, CANON_INT.test on --K, no /^[0-9]+$/', 0, ok0(() => {
+        const src = readFileSync(PROBE, 'utf8');
+        const line = 'const CANON_INT = /' + CANON_INT.source + '/;';
+        return CANON_INT.source === '^(?:0|[1-9][0-9]*)$' && src.split('\n').filter((l) => l === line).length === 1 &&
+            src.includes("CANON_INT.test(opt['--K'] ?? '21')") && !src.includes('/^[0-9]+$/');
+    }));
     let pass = 0;
     const lines = [];
     for (const [name, want, fn, pred] of cases) {
@@ -699,6 +737,12 @@ function signalPlan(sig) {
     if (sig === 'SIGTERM') return { forward: 'SIGTERM', exit: 143, graceMs: SIGNAL_GRACE_MS, fallback: 'SIGKILL' };
     return null;
 }
+// timeout plan (pure): a probe / gc lane past PROBE_TIMEOUT_MS takes the SIGTERM path (one source of truth): forward
+// SIGTERM (the gc lane's handler kills ITS child), wait graceMs, then SIGKILL if it has not exited. No exit code.
+function timeoutPlan() {
+    const p = signalPlan('SIGTERM');
+    return { forward: p.forward, graceMs: p.graceMs, fallback: p.fallback };
+}
 const PA = parseOpts(process.argv.slice(2));
 if (PA.err) die(PA.err);
 const opt = PA.opt;
@@ -774,6 +818,7 @@ if (!KEEP) process.on('exit', () => { rmSync(work, { recursive: true, force: tru
 let child = null;
 // SIGINT / SIGTERM: signalPlan (pure). Forward, then exit when the child exits (its 'exit' fires before the 'close'
 // that would resume the run loop, so no next probe / gc lane is spawned); SIGKILL after graceMs or on a second signal.
+// A probe / gc lane past PROBE_TIMEOUT_MS takes the same forward / wait / SIGKILL path (timeoutPlan, in runProbe).
 let stopping = null;
 function onSignal(sig) {
     const plan = signalPlan(sig);
@@ -795,11 +840,23 @@ process.on('SIGTERM', () => onSignal('SIGTERM'));
 function runProbe(args) {
     return new Promise((res) => {
         if (stopping !== null) return; // stopping: never spawn again (the signal path exits the process)
-        let out = '', err = '', done = false;
-        const fin = (status, signal, error) => { if (done) return; done = true; clearTimeout(timer); child = null; if (stopping === null) res({ status, signal, stdout: out, stderr: err, error }); };
+        let out = '', err = '', done = false, timedOut = false, graceTimer = null;
+        const fin = (status, signal, error) => {
+            if (done) return;
+            done = true; clearTimeout(timer); clearTimeout(graceTimer); child = null;
+            if (stopping === null) res({ status, signal, stdout: out, stderr: err, error, timedOut });
+        };
         const ch = spawn(process.execPath, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
         child = ch;
-        const timer = setTimeout(() => ch.kill('SIGKILL'), PROBE_TIMEOUT_MS);
+        // timeout: forward, wait graceMs, then the fallback only if the child has not exited (fin clears both timers)
+        const tp = timeoutPlan();
+        const timer = setTimeout(() => {
+            timedOut = true;
+            graceTimer = setTimeout(() => {
+                if (ch.exitCode === null && ch.signalCode === null) ch.kill(tp.fallback);
+            }, tp.graceMs);
+            ch.kill(tp.forward);
+        }, PROBE_TIMEOUT_MS);
         ch.stdout.setEncoding('utf8');
         ch.stderr.setEncoding('utf8');
         ch.stdout.on('data', (d) => { out += d; });
@@ -858,7 +915,9 @@ for (let cpi = 0; cpi < COMP; cpi++) {
             process.stdout.write('ran ' + tag + '\n');
         } else {
             crashed++;
-            process.stderr.write('probe crashed: ' + tag + ' status ' + r.status + ' signal ' + r.signal + ' ' + String(r.stderr || r.error || '').slice(0, 400) + '\n');
+            const tmo = r.timedOut ? ' (timed out after ' + PROBE_TIMEOUT_MS + ' ms)' : '';
+            process.stderr.write('probe crashed: ' + tag + tmo + ' status ' + r.status + ' signal ' + r.signal + ' ' +
+                String(r.stderr || r.error || '').slice(0, 400) + '\n');
         }
     }
 }
@@ -870,7 +929,10 @@ const GC_MD = join(OUT, 'compare-gc.md');
 const gcMdExists = isFile(GC_MD);
 const gcExit = acceptGc(g.status, g.signal, gcMdExists);
 process.stdout.write('ran gc lane: status ' + g.status + ' signal ' + g.signal + (gcMdExists ? '' : ' (no compare-gc.md)') + '\n');
-if (gcExit !== 0) process.stderr.write('gc lane VOID: ' + String(g.stderr || g.error || '').slice(0, 400) + '\n');
+if (gcExit !== 0) {
+    const tmo = g.timedOut ? ' (timed out after ' + PROBE_TIMEOUT_MS + ' ms)' : '';
+    process.stderr.write('gc lane VOID' + tmo + ': ' + String(g.stderr || g.error || '').slice(0, 400) + '\n');
+}
 const loadEnd = os.loadavg();
 const busyEnd = busyNodes();
 const T1 = new Date();

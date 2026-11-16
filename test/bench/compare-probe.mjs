@@ -99,8 +99,12 @@ for (const k of ['--rb', '--rb-sha8', '--o1', '--o1-sha8', '--mn', '--mn-sha8', 
 const ROW_NAMES = ['push', 'get', 'copyto32', 'copyto1024', 'wrap-step', 'wrap-push'];
 const ROW = opt['--row'];
 if (!ROW_NAMES.includes(ROW)) die(2, '--row ' + ROW_NAMES.join('|'));
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction (same text as compare.mjs's CANON_INT)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
 const K = Number(opt['--K'] ?? '21');
-if (!/^[0-9]+$/.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be an integer 5..1001');
+if (!CANON_INT.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) {
+    die(2, '--K must be a canonical integer 5..1001 (no sign, no leading zero)');
+}
 const CONTROL = opt['--control'] ?? '';
 if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'aa' && CONTROL !== 'slow') die(2, '--control box|aa|slow');
 const SMOKE = opt['--smoke'] === true;
