@@ -73,6 +73,7 @@
     "@zakkster/lite-o1": "^1.11.3",
     "@zakkster/lite-signal": "^1.5.2",
     "@zakkster/lite-utils": "1.0.0",
+    "mnemonist": "0.40.8",
     "typescript": "^7.0.2"
   }
 }

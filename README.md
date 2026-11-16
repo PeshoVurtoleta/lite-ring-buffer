@@ -202,7 +202,7 @@ The constructor rounds the requested capacity up to the next power of two:
 | 1024 | 1024 | 1023 |
 | 1025 | 2048 | 2047 |
 
-Wrap-around becomes `head = (head + 1) & mask` -- a single AND instead of a `%` modulo. Measured per wrap step (`wrap-step n1024`), `% capacity` costs 1.784x [1.759..1.829] the `& mask` step at the same power-of-two capacity (1024) and 5.630x [5.583..5.799] at a non-power-of-two capacity (1023); inside a whole hand-rolled Float32Array push (`wrap-push`) the gaps are 1.057x [1.042..1.203] and 3.204x [3.186..3.249]. Provenance: see [Comparison (REPORTED)](#comparison-reported) below.
+Wrap-around becomes `head = (head + 1) & mask` -- a single AND instead of a `%` modulo. Measured per wrap step (`wrap-step n1024`), `% capacity` costs 1.781x [1.749..1.827] the `& mask` step at the same power-of-two capacity (1024) and 5.626x [5.521..5.894] at a non-power-of-two capacity (1023); inside a whole hand-rolled Float32Array push (`wrap-push`) the gaps are 1.029x [0.998..1.062] and 3.187x [3.131..3.325]. Provenance: see [Comparison (REPORTED)](#comparison-reported) below.
 
 ### Layout
 
@@ -268,21 +268,58 @@ Two consequences of the alias-check cache: the ring carries two enumerable own k
 
 ### Comparison (REPORTED)
 
-RingBuffer against what a user would write instead: a hand-rolled `Float32Array` ring, a hand-rolled `Array` ring, and the `lite-o1` `RingDeque`. Ring of 1024 samples (32 for the copyTo n 32 row). Each cell is ns/op (median) and, in parentheses, the ratio against the RingBuffer method (median of per-round ratios; below 1 = faster than RingBuffer, above 1 = slower).
+RingBuffer against what a user would write instead: a hand-rolled `Float32Array` ring (F32H), the same ring plus RingBuffer's argument checks (CHK), a hand-rolled `Array` ring, the `lite-o1` `RingDeque`, and mnemonist `CircularBuffer` (`Float32Array`, used through its own API). Ring of 1024 samples (32 for the copyTo n 32 row). Each cell is ns/op (median) and, in parentheses, the ratio against the RingBuffer method (median of per-round ratios; below 1 = faster than RingBuffer, above 1 = slower). One run, one table.
 
-| Operation | RingBuffer method | Hand-rolled Float32Array ring | Hand-rolled Array ring | lite-o1 RingDeque (emulated) |
-|---|---|---|---|---|
-| push | 1.01 | 1.01 (0.998x) | 1.04 (1.035x) | 2.13 (2.116x) |
-| get / getOrDefault (RingBuffer: `getOrDefault(i, 0)`) | 0.92 | 0.54 (0.595x) | 0.44 (0.481x) | N/A (no indexed read) |
-| copyTo n 32 (full ring, head n/2, Float32 dst) | 24.62 | 12.74 (0.517x) | 13.56 (0.550x) | 12.68 (0.514x) |
-| copyTo n 1024 (full ring, head n/2, Float32 dst) | 277.01 | 390.40 (1.411x) | 411.70 (1.484x) | 386.05 (1.393x) |
+| Operation | RingBuffer method | Hand-rolled Float32Array ring | + RingBuffer's argument checks (CHK) | Hand-rolled Array ring | lite-o1 RingDeque (emulated) | mnemonist CircularBuffer (MN) | mnemonist `toArray` + `set` (MN_TA) |
+|---|---|---|---|---|---|---|---|
+| push | 1.02 | 1.01 (0.992x) | 1.02 (1.000x) | 1.06 (1.038x) | 2.14 (2.147x; MODES, D17) | 1.31 (1.279x) | N/A |
+| get / getOrDefault (RingBuffer: `getOrDefault(i, 0)`; MN: `get(size - 1 - i)`) | 0.92 | 0.55 (0.602x) | 0.82 (0.892x) | 0.44 (0.484x) | N/A (no indexed read) | 1.81 (1.966x) | N/A |
+| copyTo n 32 (full ring, head n/2, Float32 dst; MN: `forEach` with a hoisted store callback) | 25.25 | 12.76 (0.507x) | 23.92 (0.949x) | 13.57 (0.540x) | 12.63 (0.501x) | 157.16 (6.243x) | 136.82 (5.457x) |
+| copyTo n 1024 (same) | 314.73 | 390.16 (1.239x) | 402.10 (1.274x) | 413.63 (1.311x) | 388.33 (1.230x) | 6002.44 (18.981x) | 751.34 (2.348x) |
 
-- RingBuffer is slower than the hand-rolled loops on `get` / `getOrDefault` and on `copyTo` n 32, and faster on `copyTo` n 1024. No cause was measured here.
-- `get(i)` is 1.896x [1.880..1.908] `getOrDefault(i, 0)` (1.73 ns vs 0.92 ns) and allocates 15.99 B/op, matching the documented 16 B box; `getOrDefault` and the other timed columns read 0.00 B/op (the resolution of this bench is 8 B; `npm run alloc` is the 0 B gate).
+- RingBuffer is slower than the hand-rolled loops on `get` / `getOrDefault` and on `copyTo` n 32, and faster on `copyTo` n 1024.
+- Where the gap comes from (differences of two measured medians from this run, not separate measurements): `getOrDefault` 0.92 ns (RingBuffer) vs 0.82 ns (CHK) vs 0.55 ns (F32H), so CHK - F32H = 0.27 ns; `copyTo` n 32 25.25 vs 23.92 vs 12.76 ns, so CHK - F32H = 11.16 ns of the 12.49 ns RingBuffer - F32H gap; `copyTo` n 1024 CHK - F32H = 11.94 ns (402.10 vs 390.16). CHK - F32H is what the argument checks cost inside the same driver. RingBuffer - CHK (0.10 ns on get, 1.33 ns on copyTo n 32) is the method call against the same checks inlined in the driver; it includes driver-inlining effects (LEDGER D13), so it is not a clean "call cost". At n 1024 RingBuffer copies with `set` + `copyWithin`, the hand-rolled columns with a masked scalar loop. Push validates no argument, so CHK is F32H's body there (1.02 vs 1.01 ns).
+- `get(i)` is 1.904x [1.875..1.938] `getOrDefault(i, 0)` (1.75 ns vs 0.92 ns) and allocates 15.99 B/op, matching the documented 16 B box; `getOrDefault` and the other RingBuffer timed columns read 0.00 B/op (the resolution of this bench is 8 B; `npm run alloc` is the 0 B gate). mnemonist `get` also reads 15.99 B/op.
+- mnemonist `CircularBuffer.forEach` reads 511.96 B/op at n 32 and 16383.12 B/op at n 1024, i.e. 16 B per element per call on this host: its loop calls `callback.call(scope, item, i, this)`, which boxes the float (in code review, a direct loop over its items with the same callback read 0 B, a scratch check outside this run; the GC lane's MN_EACH cells below are the `forEach` path). `toArray()` allocates a new array per call (MN_TA: 200.02 B/op at n 32, 199.23 B/op at n 1024, typed-array headers only). B/op is V8 heap bytes: off-heap backing stores are not counted.
 - RingDeque cells are emulations: push is `if (size === capacity) popFront(); pushBack(v)`; copy is `forEach` with a hoisted store callback. RingDeque is a Float64 double-ended queue that throws when full or on NaN, a structure for a different purpose (lite-o1), not a worse ring.
 - Ratios against hand-rolled loops include driver-inlining effects: how well V8 inlines each column into the measuring loop is part of the number.
-- Provenance: one strict QUIET run under `quiet-lock run --strict`, 2026-11-15T17:21Z, Apple M4 Pro (12 cores), Darwin 27.2.0 arm64, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.62 at start / 1.68 at end, K 21 rounds x 3 compilations, every row VALID, judge exit 0; RingBuffer.js 90f7ad7c at HEAD 6431ec9; lite-o1 1.11.3; another node process read 11.5% CPU at the start sample (recorded, not judged). A/A twin and SLOW / BOX controls ran per row. The wrap-cost figures in "Why power-of-two capacity" above come from the same run.
+- Provenance: one strict QUIET run under `quiet-lock run --strict`, 2026-11-16T01:13:51Z..01:16:48Z (UTC; 177.1 s wall), Apple M4 Pro (12 cores), Darwin 27.2.0 arm64, Node v26.8.2 / V8 14.6.202.34-node.28, load1 2.81 at start / 3.75 at end (baseline 2.21; no other node process at 10% CPU or more at either sample), K 21 rounds x 3 compilations, every row VALID, judge exit 0, self-tests 307 / 307 (timing lane) and 197 / 197 (GC lane); RingBuffer.js 414bba0d at HEAD 82cd5dc (worktree clean); lite-o1 1.11.3; mnemonist 0.40.8 (exact devDependency; sha256/8 029daecd over the 7 files it loads, checked by `test/bench/mn-pin.mjs`; never shipped). A/A twin and SLOW / BOX controls ran per row. The wrap-cost figures in "Why power-of-two capacity" above come from the same run.
 - Reproduce: `npm run bench:compare` (dev-only, not in `verify`, not shipped).
+
+#### GC lane and memory per window (REPORTED)
+
+Same run (the GC lane ran as its own child processes at the end of it, 2026-11-16T01:16:39Z..01:16:48Z, every cell VALID, `--expose-gc`; 5 windows x 40000 frames, judged windows 1..4, after 50000 warm-up frames). Each frame is one push plus one copy of the n-sample window into a Float32Array (RB: `copyTo`; CTL: `copyTo` into an escaping Float32Array). B/frame is V8 heap bytes only (`total_allocated_bytes`, minimum over windows 1..4): an off-heap typed-array backing store is NOT counted, so a B/frame figure is never "total bytes"; the major / minor GC counts are the allocation witness for off-heap stores, and `abDelta` (`memoryUsage().arrayBuffers` after the last window minus after warm-up, both after gc) is a retained off-heap gauge, not an allocation witness. The floor is the empty driver's B/frame (the counter read itself, run just before each window; minimum over windows 1..4); net = raw - floor.
+
+| lib | n | major GC | minor GC | V8-heap B/frame raw | floor | net | abDelta |
+|---|---|---|---|---|---|---|---|
+| RB | 64 | 0 | 0 | 5.66 | 5.72 | -0.07 | 0 |
+| RB | 1024 | 0 | 0 | 5.69 | 5.76 | -0.07 | 0 |
+| F32H | 64 | 0 | 0 | 5.70 | 5.77 | -0.07 | 0 |
+| F32H | 1024 | 0 | 0 | 5.70 | 5.77 | -0.07 | 0 |
+| ARR | 64 | 0 | 0 | 5.70 | 5.77 | -0.07 | 0 |
+| ARR | 1024 | 0 | 0 | 4.03 | 4.10 | -0.07 | 0 |
+| DEQ (emulated) | 64 | 0 | 0 | 5.70 | 5.77 | -0.07 | 0 |
+| DEQ (emulated) | 1024 | 0 | 0 | 5.69 | 5.75 | -0.07 | 0 |
+| MN_EACH (mnemonist push + `forEach`) | 64 | 0 | 40 | 1025.42 | 1.36 | 1024.07 | 0 |
+| MN_EACH | 1024 | 0 | 625 | 16385.00 | 0.96 | 16384.04 | 0 |
+| MN_ARR (mnemonist push + `toArray`) | 64 | 0 | 8 | 200.87 | 0.23 | 200.64 | 0 |
+| MN_ARR | 1024 | 9 | 7 | 203.37 | 0.31 | 203.06 | 0 |
+| CTL (RB + escaping Float32Array dst; must-fail control) | 64 | 0 | 8 | 201.29 | 0.18 | 201.10 | 0 |
+| CTL | 1024 | 7 | 7 | 203.14 | 1.02 | 202.12 | 0 |
+
+The floor is two back-to-back `getHeapStatistics` reads; it varies by cell (0.18-5.77 B/frame in the floor column above, each the minimum over windows 1..4) and is netted out, and the RingBuffer cell is VOID unless 0 <= floor < 8 and net < 8 B/frame. Read as a measurement: RingBuffer's read path (`copyTo` into a caller-owned array) ran 0 major and 0 minor GCs and a net -0.07 B/frame at both sizes, while mnemonist's `forEach` read path boxed 16 B per element (net 1024.07 B/frame at n 64, 16384.04 at n 1024; 40 and 625 minor GCs) and its allocating `toArray` read path took 8 / 7 minor GCs (and 9 major at n 1024) at about 200 B/frame of typed-array headers, the same ballpark as the CTL control (the `toArray` data itself is off-heap and not in the B/frame column). No GC count here is a 0 B/op proof; `npm run alloc` is.
+
+Memory per window, bytes per instance (`used_heap_size` + `arrayBuffers` gauge, after gc, 512 instances per cell, bytes per instance; `ab` is the off-heap part):
+
+| lib | n = 64 | n = 256 | n = 1024 |
+|---|---|---|---|
+| RB | 689.3 (heap 433.3 + ab 256.0) | 1446.5 (422.5 + 1024.0) | 4517.6 (421.6 + 4096.0) |
+| F32H | 587.7 (331.7 + 256.0) | 1347.2 (323.2 + 1024.0) | 4419.3 (323.3 + 4096.0) |
+| ARR | 693.8 (693.8 + 0.0) | 2223.9 (2223.9 + 0.0) | 8368.0 (8368.0 + 0.0) |
+| DEQ | 875.1 (363.1 + 512.0) | 2392.2 (344.2 + 2048.0) | 8526.4 (334.4 + 8192.0) |
+| MN (mnemonist) | 614.6 (358.6 + 256.0) | 1372.7 (348.7 + 1024.0) | 4438.1 (342.1 + 4096.0) |
+
+Each is a gauge difference over 512 live instances, reported to one decimal as the bench prints it; it is not a gated bound beyond a floor of 4 bytes per sample (Float32) / 8 (Float64, Array).
 
 ---
 
@@ -372,12 +409,12 @@ Throws `RangeError` if `requestedCapacity` is not a number in `[1, 2^31]`. 2^31 
 | `npm run bench:pushbatch` | `node test/bench/pushbatch-ab.mjs` (with `test/bench/pushbatch-probe.mjs`; dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B harness for `pushBatch`. REPORTED only. |
 | `npm run bench:copyto` | `node test/bench/copyto-ab.mjs` (dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B of `copyTo` against a before build (default `git show HEAD:RingBuffer.js`), K 21 rounds x 3 compilations, with A/A and must-fail controls. REPORTED only. |
 | `npm run bench:copylast` | `node test/bench/copylast-ab.mjs` (with `test/bench/copylast-probe.mjs`; dev-only, not shipped, STATISTICAL: not in `verify`; a release-gating run holds the strict quiet lock). Interleaved A/B of `copyLast` against a caller's `copyTo` + loop (n 120 / 512 on a 1024 ring) and of `copyLast(count)` against `copyTo`, with A/A and must-fail controls. REPORTED only. |
-| `npm run bench:compare` | `node test/bench/compare.mjs` (with `test/bench/compare-probe.mjs`; dev-only, not shipped, REPORTED: not in `verify`; quotable only from a strict quiet-lock run). Public comparison of RingBuffer against a hand-rolled `Float32Array` ring, a hand-rolled `Array` ring and lite-o1 `RingDeque` (push, get / getOrDefault, copyTo n 32 / 1024, plus the `% capacity` vs `& mask` wrap lanes), K 21 rounds x 3 compilations, with an A/A twin and SLOW and BOX controls per row. Options: `--smoke` (K 5 x 1 compilation, not quotable), `--self-test`, `--out DIR`, `--K N` (5..1001), `--comp N` (1..10), `--control box|aa|slow`, `--keep`. Exit 0: every row VALID on a quiet host; 1: any row VOID or a red self-test; 2: usage / git / staging error or host not quiet. |
+| `npm run bench:compare` | `node test/bench/compare.mjs` (with `test/bench/compare-probe.mjs`; dev-only, not shipped, REPORTED: not in `verify`; quotable only from a strict quiet-lock run). Public comparison of RingBuffer against a hand-rolled `Float32Array` ring, the same ring plus RingBuffer's argument checks (CHK), a hand-rolled `Array` ring, lite-o1 `RingDeque` and mnemonist `CircularBuffer` (push, get / getOrDefault, copyTo n 32 / 1024, plus the `% capacity` vs `& mask` wrap lanes), K 21 rounds x 3 compilations, with an A/A twin and SLOW and BOX controls per row; then it runs the GC lane and memory-per-window table (`test/bench/compare-gc.mjs`, one `--expose-gc` child per cell via `test/bench/compare-gc-child.mjs`). mnemonist is a devDependency pinned to exactly 0.40.8 by version plus a sha256 over the 7 files it loads (`test/bench/mn-pin.mjs`); it is never shipped. Options: `--smoke` (K 5 x 1 compilation, not quotable), `--self-test`, `--out DIR`, `--K N` (5..1001), `--comp N` (1..10), `--control box|aa|slow`, `--keep`. Exit 0: every row VALID on a quiet host; 1: any row VOID or a red self-test; 2: usage / git / staging error or host not quiet. |
 | `npm run torture` | `test/torture.mjs` (dev-only): lite-leak retention and lite-gc-profiler GC budget (below). |
 | `npm run ascii` | `test/ascii.mjs`: fails on any non-ASCII character in `package.json`, the `files[]` entries, `test/` and `.github/` (U+00D7 and U+00B5 are allowed; `.github/` is required: a missing path exits 2). |
 | `npm run verify` | `npm test && npm run alloc && npm run torture && npm run ascii` |
 
-CI (`.github/workflows/ci.yml`, every push and pull request; DETERMINISTIC gates only, no timing benchmark runs there) has 12 legs: Node 18 / 20 / 22 / 24 / 26 on ubuntu-latest and macos-latest, plus a Node 26.8.2 leg per OS. The 26.8.2 legs run the full `npm run verify`, `test:core` and `test:types`; the 26 legs run `test:core`, `test:types`, `alloc` and `torture`; the 20 / 22 / 24 legs run `test:core`, `test:types` and `torture`; the 18 legs run `test:core` and `test:types`. Every lane a leg cannot run is a named SKIP step that prints its reason. (Added 2026-11-16; first hosted run pending: the workflow has not run on GitHub yet, so it is unverified there.)
+CI (`.github/workflows/ci.yml`, every push and pull request; DETERMINISTIC gates only, no timing benchmark runs there) has 12 legs: Node 18 / 20 / 22 / 24 / 26 on ubuntu-latest and macos-latest, plus a Node 26.8.2 leg per OS. The 26.8.2 legs run the full `npm run verify`, `test:core` and `test:types`; the 26 legs run `test:core`, `test:types`, `alloc` and `torture`; the 20 / 22 / 24 legs run `test:core`, `test:types` and `torture`; the 18 legs run `test:core` and `test:types`. Every lane a leg cannot run is a named SKIP step that prints its reason. (Workflow added 2026-11-16 local; first hosted run 43773037509, the push of 82cd5dc at 2026-11-15T23:07Z UTC, passed all 12 legs.)
 
 `npm run torture` checks:
 
@@ -412,7 +449,7 @@ flowchart LR
 ## FAQ
 
 **Why power-of-two capacity? Why not just take the user's number?**
-Because wrap-around is then `head & mask`, one AND, and the comparison section above measures what `% capacity` costs against it: 1.784x [1.759..1.829] per wrap step at the same power-of-two capacity, 1.057x [1.042..1.203] inside a whole hand-rolled push, and 5.630x / 3.204x at a non-power-of-two capacity (REPORTED, same run).
+Because wrap-around is then `head & mask`, one AND, and the comparison section above measures what `% capacity` costs against it: 1.781x [1.749..1.827] per wrap step at the same power-of-two capacity, 1.029x [0.998..1.062] inside a whole hand-rolled push, and 5.626x / 3.187x at a non-power-of-two capacity (REPORTED, same run).
 
 **Why `Float32Array` and not `Float64Array`?**
 Two reasons: (1) telemetry numbers -- frame times in ms, audio amplitudes, mouse velocity in px/s -- fit comfortably in float32; (2) consumers like `<canvas>`, WebGL vertex buffers, and Web Audio nodes are all float32-native, so a downstream `copyTo` into a Float32Array is a same-type copy with no conversion.

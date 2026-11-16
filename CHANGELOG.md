@@ -14,7 +14,10 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 - `npm run test:core` (`test/core.mjs`, not in `verify`): the portable core lane. The 10 base test files (206 tests) run on Node 18 / 20 / 22 / 24 / 26, each in its own `--test-reporter=tap` child, count-gated against `test/count.mjs`; the feature tier (`qa-r1`, `qa-r3`, `qa-m1`: 41 tests) runs where `ArrayBuffer#transfer`, `#resize` and `SharedArrayBuffer#grow` exist, else a named SKIP (a Node >= 22 missing one fails).
 - `npm run test:types` (`tsc -p test/types/tsconfig.json`, strict; new devDependency `typescript` ^7.0.2): `test/types/ringbuffer.test-d.ts` exercises every export and member of `RingBuffer.d.ts` and pins 6 misuse errors.
-- `.github/workflows/ci.yml`: 12 legs (Node 18 / 20 / 22 / 24 / 26 on ubuntu-latest and macos-latest, plus Node 26.8.2 per OS); DETERMINISTIC gates only; every lane a leg cannot run is a named SKIP step. Not yet run on GitHub.
+- `.github/workflows/ci.yml`: 12 legs (Node 18 / 20 / 22 / 24 / 26 on ubuntu-latest and macos-latest, plus Node 26.8.2 per OS); DETERMINISTIC gates only; every lane a leg cannot run is a named SKIP step. First hosted run 43773037509 (push of 82cd5dc, 2026-11-15T23:07Z UTC) passed all 12 legs.
+
+- `npm run bench:compare` (dev-only, REPORTED, not in `verify`, not shipped; Q2): a CHK column (hand-rolled Float32Array ring + RingBuffer's argument checks copied as text; splits the `getOrDefault` / `copyTo` gap into check cost vs loop cost), a mnemonist `CircularBuffer` column (MN; MN_TA = `toArray` + `set` on the copy rows), a GC lane and memory-per-window table (`test/bench/compare-gc.mjs` + `compare-gc-child.mjs`, one `--expose-gc` child per cell; V8-heap B/frame only, with the empty-driver floor netted out; major / minor GC counts are the allocation witness), and a `want` / `accept` child-output self-test (compare 307 checks, GC lane 197).
+- devDependency `mnemonist` pinned to exactly 0.40.8 (maintainer ruling Q-Q2-MNEMONIST, 2026-11-16) by version plus a sha256 over the 7 files it loads (`test/bench/mn-pin.mjs`); runtime `dependencies` stays empty.
 
 ### Changed
 
@@ -22,6 +25,7 @@ arm64, 2026-10-14. Not timed, so host load does not affect them.
 
 ### Docs
 
+- README "Comparison (REPORTED)" and `llms.txt` refreshed from ONE strict QUIET run, 2026-11-16T01:13Z..01:16Z (Apple M4 Pro, Node v26.8.2, load1 2.81 at start / 3.75 at end, K 21 x 3 compilations, every row VALID): one table with the CHK and mnemonist columns, a GC lane and a memory-per-window table (B/frame is V8 heap bytes only; off-heap typed-array backing stores are not counted); the wrap-cost figures in "Why power-of-two capacity" moved to the same run. REPORTED, not gated.
 - README and `llms.txt`: the claim that the other dev scripts need Node >= 24 was false. `npm run alloc` needs V8's `total_allocated_bytes`, present on Node v26.8.2 and absent on v18.20.8 / v20.20.2 / v22.23.5 / v24.22.3 (local runs 2026-11-16); `npm run torture` needs Node >= 20. The Testing section documents `test:core`, `test:types` and CI.
 
 ## [1.5.5] - 2026-11-15

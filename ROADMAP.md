@@ -262,6 +262,9 @@ v20.20.2 / v22.23.5 / v24.22.3 / v26.8.2 in `.handoff/q1/evidence/`. The workflo
 maintainer pushes.
 
 ### Q2 -- B2: extend the comparison bench (REPORTED only; one strict run)
+STATUS 2026-11-16: done in the working tree (not committed); one strict quiet-lock run, exit 0 (`.handoff/q2/strict-1/`,
+2026-11-16T01:13Z..01:16Z). Rulings: Q-Q2-MNEMONIST (devDependency) and exactly 0.40.8 (version + sha256 pin). Review r1
+REJECT -> maintainer "Fix once, re-review" -> r2 APPROVED (LEDGER C19, D19..D21). README Comparison, llms.txt and CHANGELOG carry the numbers (B1's "no cause measured" answered by strict-1).
 - A "checked" hand-rolled Float32Array column with the same argument checks as RingBuffer, so B1's `getOrDefault`
   0.59x and `copyTo` n 32 0.52x gaps split into validation cost vs loop cost (today: no cause measured).
 - A mnemonist `CircularBuffer(Float32Array, n)` column (the closest real competitor), pinned by version + sha256 like

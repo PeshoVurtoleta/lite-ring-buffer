@@ -53,17 +53,18 @@ the R1b fix is committed (7b0f74b). Unit D was first committed as c2c28e0 (still
 1. **A gate that cannot fail is not a gate.** Every gate needs a must-fail control that fails for
    its own reason (test/count.mjs has none committed yet; its controls are scratch under
    `.handoff/archive/1.2.1/D2/mut/`), and every comparison is written so NaN fails it. *(A6, A10, B1, C1, C2, C3, C5, C6, C7,
-   C8, C10, C11, C15, C17, C18, D7, D18, B10)*
+   C8, C10, C11, C15, C17, C18, C19, D7, D18, D20, B10)*
 2. **Fail closed on every unverified state, including the harness.** A zero-match glob, a missing
    path, a missing `files[]`, a missing summary event, a missing `global.gc` and a NaN counter each
-   passed silently once; a missing tier output read exit 1, not NO-VERDICT. *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18, D18)*
+   passed silently once; a missing tier output read exit 1, not NO-VERDICT.
+   *(B1, B10, C1, C2, C3, C6, C8, C10, C11, C15, C18, C19, D18)*
 3. **A zero-GC claim names its resolution.** GC counts prove "less than res B/op", not 0 B/op;
-   the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6)*
+   the per-op byte gate is `test/alloc.mjs`. *(A6, A9, C4, D3, D4, D6, D19)*
 4. **Measure allocation with the counter that sees transient boxes.** V8 `total_allocated_bytes`,
    not a `heapUsed` delta; steady state is the minimum over windows 1..W-1, never window 0, and a
-   lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12)*
+   lane must run in optimized code. *(B2, C8, D1, D2, D3, D6, D12, D19, D20)*
 5. **Measured numbers enter docs from a run log of this cycle; an estimate is "nominal".** A figure
-   derived from another measurement is not a measurement. *(A11, B4, B12, C9, D4, D16, D17, D18)*
+   derived from another measurement is not a measurement. *(A11, B4, B12, C9, D4, D16, D17, D18, D20, D21)*
 6. **A status line names a run that exists on the final tree.** A verify that hit a BUSY lock, ran
    unlocked and predated the final code is not "closing verify PRELIMINARY". *(C9)*
 7. **A doc claim is a claim about every caller path (allocation, and any list that reads as exhaustive).** "Zero allocation" holds only
@@ -1058,6 +1059,26 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
 - **Law.** 1, 2.
 - **Gate.** `node test/bench/compare.mjs --self-test` (125 checks; reverting the rounds, per-round-ratio, host-tag, ns-mask or COL_NOTE-label fix turns it red; the probe-output accept check acceptProbe, compare.mjs:226, called at :547, has one reject case per clause and dropping any clause turns it red).
 
+### C19. The Q2 CHK argument oracle never exercised the guard's cache statements (Q2 review r1)
+
+- **What happened.** Review r1 (group A, 2026-11-16) found that `chkArgs`, the oracle for the CHK column's copied
+  argument checks, compared RingBuffer and CHK by outcome and error class only. Two mutants of the copied alias-cache
+  guard (`if (data !== ring._bufOf)` -> `if (ring._bufOf === null)`, and dropping `ring._bufOf = data;`) kept every
+  outcome identical, so a CHK that silently skipped or lost the cache statements would have been timed and reported as
+  "RingBuffer's argument checks". Maintainer ruled "Fix once, re-review" (SPEC A11).
+- **Root cause.** The oracle observed results, not the state the checks exist to maintain (laws 1, 2): the cache is
+  the cost being measured and nothing compared it.
+- **Fix.** New ARG_STATE `swapData` (warm both caches, replace `data` with a new full-length array of the same values,
+  copy into the OLD data) and, after every ok outcome, a cache-parity assert `(rb._bufOf === rb.data) ===
+  (ck._bufOf === ck.data)`; mutants MUT_CHK_STALE and MUT_CHK_NOCACHE on both copy rows.
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A11; `.handoff/q2/review-r1/` (gitignored
+  paths, maintainer checkout only); round 2 APPROVED.
+- **Law.** 1, 2.
+- **Gate.** `node test/bench/compare.mjs --self-test` (307 checks in the strict-1 run): rows `copyto32 MUT_CHK_STALE
+  missed -> 1`, `copyto1024 MUT_CHK_STALE missed -> 1`, `copyto32 MUT_CHK_NOCACHE missed -> 1`, `copyto1024
+  MUT_CHK_NOCACHE missed -> 1` (and their `null` / `missing` rows). Reverting `swapData` or the parity assert lets a
+  mutant through.
+
 ---
 
 ## D. Measurement traps
@@ -1385,3 +1406,56 @@ ascii`, DETERMINISTIC tier only. No single green gate authorises a release.
   `transfer` deleted, timeout, maxBuffer, spawn ENOENT); `.github/workflows/ci.yml` named SKIP steps (alloc on
   18 / 20 / 22 / 24 prints whether the engine has the counter, printed not gated). Reopens if the CI matrix changes an
   engine or a claim about another engine is made without a run on it.
+
+### D19. `total_allocated_bytes` counts V8 heap only; off-heap typed-array stores are invisible (Q2 B0 F1)
+
+- **What happened.** The B0 scratch probe of the Q2 bench read `new Float32Array(n)` at ~215-285 B/op for n 8..1024
+  (B0 scratch, SPEC A7; nominal, no run log; at n <= 16 V8 may keep the store on-heap):
+  the object headers only, not the n * 4 byte store. A B/op or B/frame figure therefore cannot say "total bytes", and an
+  allocating `toArray` into a typed array looks small in it (SPEC A7).
+- **Root cause.** The counter (V8 `total_allocated_bytes`, D1 / law 4) is a heap counter; ArrayBuffer backing stores
+  live off-heap.
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A7; REPORTED run
+  `.handoff/q2/strict-1/compare-gc.md` (2026-11-16T01:16Z, Node v26.8.2 / V8 14.6.202.34-node.28, QUIET, load1 2.81 at
+  the lock): MN_ARR 200.87 B/frame (n 64; 8 minor, 0 major) and 203.37 (n 1024; 7 minor, 9 major), CTL 201.29 (8 minor,
+  0 major) and 203.14 (7 minor, 7 major). gitignored paths.
+- **Law.** 3, 4 (a B/op claim names its resolution and its scope: heap bytes).
+- **Gate.** `test/bench/compare-gc.mjs --self-test` (197 checks): CTL teeth are minor >= 1 AND raw B/frame >= 128 at
+  every n (rows `CTL n64 / n1024 B/frame 127.99 -> 1`, `B/frame 128 -> 0`, `minor 0 -> 1`); the memory lane keeps the
+  `arrayBuffers` term (`control mem: F32H n1024 perInstB 300 -> 1`). Docs say "V8 heap bytes only" once per table and
+  use the GC counts as the off-heap witness; `abDelta` is a retained gauge, never an allocation witness.
+
+### D20. The counter read has a floor (0.18-5.77 B/frame in strict-1); a raw B/frame bound failed on an empty driver
+
+- **What happened.** Two back-to-back `getHeapStatistics` reads differed by ~205-230 KB in the B-child scratch
+  (SPEC A10; nominal, no run log), ~5.1-5.9 B/frame at 40,000
+  frames; an empty driver read nonzero and a raw `< 8` bound on RingBuffer sat next to its own noise floor (SPEC A10).
+  Review r1 (group B) then found the netted calibration term itself was unbounded: a floor of 99 would have let an
+  allocating RingBuffer pass as "net < 8" (SPEC A12).
+- **Root cause.** The measurement instrument has a nonzero, per-window-varying cost (law 5: the floor is measured, not
+  assumed fixed); a subtraction with an unbounded subtrahend gates nothing (law 1).
+- **Evidence.** HEAD 82cd5dc + the Q2 working tree; `.handoff/q2/SPEC.md` A10 / A12; `.handoff/q2/review-r1/`;
+  `.handoff/q2/strict-1/compare-gc.md` (RB floor 5.72 / 5.76, net -0.07 / -0.07 B/frame; other cells 0.18-5.77).
+  gitignored paths.
+- **Law.** 1, 4, 5.
+- **Gate.** `test/bench/compare-gc.mjs --self-test`: the RB cell is VOID unless 0 <= floor < 8 AND net < 8; rows
+  `RB n64 / n1024 floor 99 (bpf 50) -> 1`, `floor 8 (bpf 8) -> 1`, `floor -0.5 (bpf 0) -> 1`,
+  `bpf 20 floor 14 (net 6) -> 1`, `net 8 (14 - 6) -> 1`, and the in-bound `floor 7.99` rows -> 0.
+  md shows raw, floor and net.
+
+### D21. mnemonist `CircularBuffer.forEach` boxes 16 B per element per call (Q2, REPORTED)
+
+- **What happened.** The mnemonist column's copy rows read 511.96 B/op at n 32 and 16383.12 B/op at n 1024 for
+  `forEach` with a hoisted store callback. Review proved the cause: its loop calls `callback.call(scope, item, i,
+  this)` and that call boxes the float; a direct loop over its items with the same callback read 0 B (review r1 scratch,
+  `.handoff/q2/review-r1/VERDICTS.md`; not a strict-1 figure); the GC lane's MN_EACH cells read 1025.42 B/frame at n 64,
+  16385.00 at n 1024 (40 / 625 minor GCs). `toArray()` allocates a new array
+  per call (MN_ARR / MN_TA).
+- **Root cause.** A non-inlined call boundary on a fractional value (the zero-box rule), in the competitor, not here.
+- **Evidence.** `.handoff/q2/strict-1/compare.md` (copyto32 / copyto1024 MN rows) and `compare-gc.md` (MN_EACH, MN_ARR
+  rows); one strict QUIET run, 2026-11-16T01:13Z..01:16Z, Apple M4 Pro, Node v26.8.2 / V8 14.6.202.34-node.28,
+  load1 2.81 at start / 3.75 at end, K 21 x 3 compilations; mnemonist 0.40.8 (sha256/8 029daecd). gitignored paths.
+- **Law.** 5 (a REPORTED figure of a competitor, with provenance, worded as a measurement).
+- **Gate.** None (REPORTED, no bound; MN_EACH / MN_ARR are ungated in the judge). What is gated is the pin:
+  `test/bench/mn-pin.mjs` (exact version 0.40.8 + sha256 over the 7 loaded files; a drift makes the lane VOID) and the
+  child's sha8 checks in the `accept` self-test rows.

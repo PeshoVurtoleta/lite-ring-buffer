@@ -12,7 +12,13 @@
 // RingBuffer.mjs (removed on exit, also on SIGINT / SIGTERM, unless --keep; probes are spawned async so a
 // signal is handled between and during probes: the running probe is killed, then the dir is removed); RingDeque = the installed
 // devDependency @zakkster/lite-o1 (>= 1.11.3), resolved here and passed to the probe with its sha256/8
-// (the probe fails closed on a mismatch).
+// (the probe fails closed on a mismatch); MN / MN_TA = the devDependency mnemonist, EXACT 0.40.8 (mn-pin.mjs):
+// circular-buffer.js is resolved with createRequire from ROOT/package.json (its subpaths are require-only),
+// never required here, and checked by mnCheck(ROOT/node_modules) (name, version, combined digest ===
+// MN_SHA256) before anything is staged; the probe gets `--mn FILE --mn-sha8 MN_SHA256/8`.
+// CHK = F32H's loop plus RingBuffer's own argument checks (text copy); push / get / copy rows require the
+// probe's chkTpl (and chkArgs on get / copy) checks === true, and CHK B/op < 8.
+// B/op everywhere = V8 heap bytes per op (v8 total_allocated_bytes); off-heap backing stores not counted.
 // Rows: push, get, copyto32, copyto1024, wrap-step, wrap-push (see compare-probe.mjs) x --comp compilations,
 // each a fresh `node --allow-natives-syntax --expose-gc test/bench/compare-probe.mjs` process,
 // compilation-major. --smoke = K 5 x 1 compilation, reps capped at 1e5.
@@ -20,34 +26,48 @@
 // COL/REF; per-compilation medians (D16); MODES flag when a column's per-compilation ns/op max/min >= 1.5
 // (D17, REPORTED only).
 // A row is VOID on: a crash / missing compilation; TurboFan calibration false or a driver not TurboFan; an
-// oracle (before or after timing), mutant, uniqueSrc, sameTpl or wrapOnly failure; B/op not < 8 on REF,
-// REF_AA or SLOW (REF is MASK on the wrap rows); BOX or GET B/op outside 12..20; A/A (REF_AA/REF) median
+// oracle (before or after timing), mutant, uniqueSrc, sameTpl, wrapOnly, chkTpl or chkArgs failure; B/op not
+// < 8 on REF, REF_AA, SLOW or CHK (REF is MASK on the wrap rows; MN / MN_TA B/op is reported, not gated); BOX
+// or GET B/op outside 12..20; A/A (REF_AA/REF) median
 // outside 0.93..1.07; SLOW/REF not (median >= 1.5 and Q1 >= 1.3); a ratio not measured (NaN).
 // --smoke turns the two timing bands into "BAND (smoke)" reasons (row stays VALID); the report is headed
 // "SMOKE: not quotable".
-// Exit 0 = every row VALID on a QUIET host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID (or a
-// red self-test); 2 = usage / git / staging error or host not quiet.
+// GC lane (HOOK H, SPEC A2): after the probes, one `node test/bench/compare-gc.mjs --out DIR --rb <staged RB>
+// --rb-sha8 .. --o1 .. --o1-sha8 .. --mn .. --mn-sha8 .. [--smoke]` (DIR = this run's --out dir, created empty
+// here, so it never holds an old compare-gc.{md,json}; the gc lane gets the same staged HEAD RingBuffer the
+// probes get; --control is not passed). Its exit 2 = die(2); it counts VALID (acceptGc) only on status 0, no
+// signal and DIR/compare-gc.md present. DIR/compare-gc.md is appended after the tables; compare.json gets
+// gc: {exit (its raw status), file (compare-gc.md path or null)}. compare-gc.mjs's own self-test is a separate
+// entry point, not run by --self-test here.
+// Exit (exitAll, pure: combineExit(judge exit, gc lane)): 0 = every row VALID and the gc lane VALID on a QUIET
+// host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID row, a VOID gc lane (or a red self-test);
+// 2 = usage / git / staging error or host not quiet.
 // The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases;
-// every real run runs them first, before any spawn. The probe-output accept check (acceptProbe: row, both
-// sha256/8, control, smoke, K) is pure and self-tested too.
+// every real run runs them first, before any spawn. The probe argv (buildArgs), the expected echo (buildWant),
+// the probe's echo of an argv (echoOf) and the probe-output accept check (acceptProbe: row, the three sha256/8,
+// control, smoke, K; every want sha8 must be 8 lowercase hex) are pure and self-tested end to end; a real run
+// re-checks that wiring on its real pins (each single-field flip rejected) before any probe spawn.
 // Writes DIR/compare.json and DIR/compare.md; DIR = --out (new or empty), else ROOT/.handoff/bench-compare/compare-<ISO>/.
 // Test tooling only: not shipped.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync, readdirSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MN_VERSION, MN_SHA256, OBLITERATOR_VERSION, mnCheck } from './mn-pin.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const PROBE = join(HERE, 'compare-probe.mjs');
+const GC = join(HERE, 'compare-gc.mjs');
 const LIVE = join(ROOT, 'RingBuffer.js');
 const PROBE_TIMEOUT_MS = 900000;
 const O1_MIN = [1, 11, 3];
 
 // ---- judge constants ----------------------------------------------------------------------------------
-const BOP_MAX = 8;            // half a 16 B box: REF, REF_AA, SLOW must read below it
+const BOP_MAX = 8;            // half a 16 B box: REF, REF_AA, SLOW and each row's gated columns (CHK) must read below it
 const BOX_LO = 12;            // one HeapNumber per call (16 B on Node) -> 12..20
 const BOX_HI = 20;
 const AA_LO = 0.93;
@@ -55,20 +75,26 @@ const AA_HI = 1.07;
 const SLOW_MED_MIN = 1.5;
 const SLOW_Q1_MIN = 1.3;
 const MODES_RATIO = 1.5;
+// req = probe checks that must be === true (anything else -> VOID); gated = B/op < 8 columns beyond REF / REF_AA / SLOW
+const COPY_COLS = ['RB', 'RB_AA', 'F32H', 'CHK', 'ARR', 'DEQ', 'MN', 'MN_TA', 'SLOW'];
+const COPY_MUTS = ['MUT_WRAP', 'MUT_OBO', 'MUT_CHK_BOUNDS', 'MUT_CHK_ALIAS', 'MUT_CHK_STALE', 'MUT_CHK_NOCACHE'];
 const ROWS = {
-    push: { label: 'push n1024', ref: 'RB', aa: 'RB_AA', cols: ['RB', 'RB_AA', 'F32H', 'ARR', 'DEQ', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'sameTpl', boxCols: [] },
-    get: { label: 'get n1024', ref: 'GOD', aa: 'GOD_AA', cols: ['GOD', 'GOD_AA', 'GET', 'F32H', 'ARR', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_GET', 'MUT_OBO'], tpl: 'sameTpl', boxCols: ['GET'] },
-    copyto32: { label: 'copyto32 (full, head n/2, Float32 dst)', ref: 'RB', aa: 'RB_AA', cols: ['RB', 'RB_AA', 'F32H', 'ARR', 'DEQ', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'sameTpl', boxCols: [] },
-    copyto1024: { label: 'copyto1024 (full, head n/2, Float32 dst)', ref: 'RB', aa: 'RB_AA', cols: ['RB', 'RB_AA', 'F32H', 'ARR', 'DEQ', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'sameTpl', boxCols: [] },
-    'wrap-step': { label: 'wrap-step n1024', ref: 'MASK', aa: 'MASK_AA', cols: ['MASK', 'MASK_AA', 'MOD', 'MOD_NP2', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'wrapOnly', boxCols: [] },
-    'wrap-push': { label: 'wrap-push n1024', ref: 'MASK', aa: 'MASK_AA', cols: ['MASK', 'MASK_AA', 'MOD', 'MOD_NP2', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'wrapOnly', boxCols: [] },
+    push: { label: 'push n1024', ref: 'RB', aa: 'RB_AA', cols: ['RB', 'RB_AA', 'F32H', 'CHK', 'ARR', 'DEQ', 'MN', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'sameTpl', boxCols: [], req: ['chkTpl'], gated: ['CHK'] },
+    get: { label: 'get n1024', ref: 'GOD', aa: 'GOD_AA', cols: ['GOD', 'GOD_AA', 'GET', 'F32H', 'CHK', 'ARR', 'MN', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_GET', 'MUT_OBO', 'MUT_CHK_COUNT', 'MUT_CHK_INT'], tpl: 'sameTpl', boxCols: ['GET'], req: ['chkTpl', 'chkArgs'], gated: ['CHK'] },
+    copyto32: { label: 'copyto32 (full, head n/2, Float32 dst)', ref: 'RB', aa: 'RB_AA', cols: COPY_COLS, mutants: COPY_MUTS, tpl: 'sameTpl', boxCols: [], req: ['chkTpl', 'chkArgs'], gated: ['CHK'] },
+    copyto1024: { label: 'copyto1024 (full, head n/2, Float32 dst)', ref: 'RB', aa: 'RB_AA', cols: COPY_COLS, mutants: COPY_MUTS, tpl: 'sameTpl', boxCols: [], req: ['chkTpl', 'chkArgs'], gated: ['CHK'] },
+    'wrap-step': { label: 'wrap-step n1024', ref: 'MASK', aa: 'MASK_AA', cols: ['MASK', 'MASK_AA', 'MOD', 'MOD_NP2', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'wrapOnly', boxCols: [], req: [], gated: [] },
+    'wrap-push': { label: 'wrap-push n1024', ref: 'MASK', aa: 'MASK_AA', cols: ['MASK', 'MASK_AA', 'MOD', 'MOD_NP2', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'wrapOnly', boxCols: [], req: [], gated: [] },
 };
 const ROW_LIST = Object.keys(ROWS);
 const COL_NOTE = {
     RB: 'RingBuffer method', GOD: 'getOrDefault(i, 0)', GET: 'get(i)', F32H: 'hand-rolled Float32Array ring',
     ARR: 'hand-rolled Array ring', DEQ: 'RingDeque, emulated', MASK: '& mask', MOD: '% capacity n (pow2, same capacity as MASK)',
     MOD_NP2: '% capacity n - 1 (not pow2)', SLOW: 'control: REF twice', BOX: 'control: REF + one box',
+    CHK: 'F32H + RingBuffer argument checks (text copy)', MN: 'mnemonist CircularBuffer ' + MN_VERSION + ', own API',
+    MN_TA: 'mnemonist toArray + set: allocates a Float32Array per call',
 };
+const BOP_NOTE = 'max B/op = V8 heap bytes per op; off-heap backing stores not counted.';
 
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
@@ -118,7 +144,8 @@ function judgeRow(row, rs, comp, smoke) {
     for (const m of S.mutants) if (!rs.every((r) => ck(r).mutants && ck(r).mutants[m] === true)) v.push(m + ' not caught');
     if (!rs.every((r) => ck(r).uniqueSrc === true)) v.push('uniqueSrc');
     if (!rs.every((r) => ck(r)[S.tpl] === true)) v.push(S.tpl);
-    const gate0 = [['REF ' + S.ref, S.ref], ['REF_AA ' + S.aa, S.aa], ['SLOW', 'SLOW']];
+    for (const k of S.req) if (!rs.every((r) => ck(r)[k] === true)) v.push(k);
+    const gate0 = [['REF ' + S.ref, S.ref], ['REF_AA ' + S.aa, S.aa], ['SLOW', 'SLOW']].concat(S.gated.map((k) => [k, k]));
     for (const [nm, k] of gate0) {
         const bad = bop[k].filter((x) => !(x < BOP_MAX));
         if (bad.length || !bop[k].length) v.push(nm + ' B/op ' + bad.map((x) => f(x)).join(',') + ' not < ' + BOP_MAX);
@@ -175,7 +202,12 @@ function renderRow(r) {
         const modes = k === 'BOX' ? '-' : r.modes[k] ? 'MODES' : '-';
         md += '| ' + [k + tag, what, nsC, ratio, pc, pcn, f(mx(r.bop[k]), 2), modes].join(' | ') + ' |\n';
     }
+    md += '\n' + BOP_NOTE + '\n';
     if (r.row === 'get') md += '\nRingDeque: N/A (no indexed read).\n';
+    if (r.row === 'push') md += '\nCHK == F32H here: push validates no argument, so CHK\'s body is F32H\'s (chkTpl checks that).\n';
+    if (r.cols.includes('CHK')) md += '\n' + r.ref + ' - CHK = the method call vs the same argument checks inlined in the driver; it includes driver-inlining effects (D13).\n';
+    if (r.row === 'copyto1024') md += '\nRB here copies with the intrinsic `set` + `copyWithin` rotate (> 32 samples); CHK, F32H and ARR use a masked scalar loop.\n';
+    if (r.cols.includes('MN_TA')) md += '\nMN_TA allocates a fresh Float32Array per call (toArray): its heap B/op counts the typed-array objects only, not their data.\n';
     return md + '\n';
 }
 function renderQuote(rows, out, smoke, host) {
@@ -216,16 +248,82 @@ function synthRun(row, o = {}) {
         tfCalib: true, turbofan: true, uniqueSrc: true, [S.tpl]: true,
         oracle: all(true), oracleAfter: all(true), mutants: Object.fromEntries(S.mutants.map((m) => [m, true])),
     };
+    for (const k of S.req) checks[k] = true;
     if (o.checks) o.checks(checks);
     const out = { row, K: 7, rounds, bop, checks };
     if (o.noRounds) delete out.rounds;
     if (o.shortRounds) out.rounds = rounds.slice(0, 6);
     return out;
 }
-// probe-output accept check (pure): want = { row, rb, o1, control, smoke, K } with K the CLI string
+// probe-output accept check (pure): want = { row, rb, o1, mn, control, smoke, K } with K the CLI string; every
+// want sha8 must be 8 lowercase hex (a field missing on both sides never passes)
+const HEX8 = /^[0-9a-f]{8}$/;
 function acceptProbe(j, want) {
-    return !!(j && j.row === want.row && j.sha8 && j.sha8.rb === want.rb && j.sha8.o1 === want.o1 &&
+    return !!(want && HEX8.test(want.rb) && HEX8.test(want.o1) && HEX8.test(want.mn) &&
+        j && j.row === want.row && j.sha8 && j.sha8.rb === want.rb && j.sha8.o1 === want.o1 && j.sha8.mn === want.mn &&
         j.control === want.control && j.smoke === want.smoke && j.K === Number(want.K));
+}
+// gc lane accept (pure): 0 only on status 0, no signal (null) and compare-gc.md present (=== true); else 1
+function acceptGc(status, signal, mdExists) {
+    return status === 0 && signal === null && mdExists === true ? 0 : 1;
+}
+// overall exit (pure): judge exit 0 / 2 survives only with a gc lane 0; anything else (a VOID row, a VOID gc
+// lane, a non-0/1/2 value, NaN, null) is 1. A judge 2 (host not quiet) with a VALID gc lane stays 2.
+function combineExit(jExit, gcExit) {
+    return gcExit === 0 && (jExit === 0 || jExit === 2) ? jExit : 1;
+}
+// probe argv (pure): pins = { rbPath, rbSha8, o1Path, o1Sha8, mnPath, mnSha8 }; cfg = { K (CLI string), control ('' = none), smoke }
+const PROBE_FLAGS = ['--allow-natives-syntax', '--expose-gc'];
+function buildArgs(row, pins, cfg) {
+    return PROBE_FLAGS.concat([PROBE, '--rb', pins.rbPath, '--rb-sha8', pins.rbSha8, '--o1', pins.o1Path, '--o1-sha8', pins.o1Sha8,
+        '--mn', pins.mnPath, '--mn-sha8', pins.mnSha8, '--row', row, '--K', cfg.K],
+    cfg.control ? ['--control', cfg.control] : [], cfg.smoke ? ['--smoke'] : []);
+}
+function buildWant(row, pins, cfg) {
+    return { row, rb: pins.rbSha8, o1: pins.o1Sha8, mn: pins.mnSha8, control: cfg.control, smoke: cfg.smoke, K: cfg.K };
+}
+// what the probe echoes for an argv (pure, parsed the probe's way: strict options after PROBE, K a Number,
+// control '' when absent, smoke a boolean, sha8 = the expected digests it verified); null where the probe exits 2
+const ECHO_VALUE = ['--rb', '--rb-sha8', '--o1', '--o1-sha8', '--mn', '--mn-sha8', '--row', '--K', '--control'];
+function echoOf(args) {
+    const at = args.indexOf(PROBE);
+    if (at < 0) return null;
+    const o = Object.create(null);
+    for (let i = at + 1; i < args.length; i++) {
+        const a = args[i];
+        if (a in o) return null;
+        if (a === '--smoke') { o[a] = true; continue; }
+        if (!ECHO_VALUE.includes(a)) return null;
+        const v = args[i + 1];
+        if (typeof v !== 'string' || v === '' || v.startsWith('--')) return null;
+        o[a] = v;
+        i++;
+    }
+    for (const k of ['--rb', '--rb-sha8', '--o1', '--o1-sha8', '--mn', '--mn-sha8', '--row']) if (!(k in o)) return null;
+    const ks = o['--K'] ?? '21';
+    if (!/^[0-9]+$/.test(ks)) return null;
+    return { row: o['--row'], sha8: { rb: o['--rb-sha8'], o1: o['--o1-sha8'], mn: o['--mn-sha8'] }, control: o['--control'] ?? '', smoke: o['--smoke'] === true, K: Number(ks) };
+}
+// end-to-end wiring (pure): for every row the real argv's echo is accepted against the real want, and each
+// single-field flip of the argv (rb / o1 / mn / K / control / smoke / row) is rejected. Returns the failures.
+const flipHex = (s) => (typeof s === 'string' && s.length ? s.slice(0, -1) + (s.endsWith('0') ? '1' : '0') : 'x');
+function wiringFails(pins, cfg) {
+    const bad = [];
+    for (const row of ROW_LIST) {
+        const want = buildWant(row, pins, cfg);
+        if (acceptProbe(echoOf(buildArgs(row, pins, cfg)), want) !== true) bad.push(row + ': real argv not accepted');
+        const flips = [
+            ['rb', buildArgs(row, { ...pins, rbSha8: flipHex(pins.rbSha8) }, cfg)],
+            ['o1', buildArgs(row, { ...pins, o1Sha8: flipHex(pins.o1Sha8) }, cfg)],
+            ['mn', buildArgs(row, { ...pins, mnSha8: flipHex(pins.mnSha8) }, cfg)],
+            ['K', buildArgs(row, pins, { ...cfg, K: String(Number(cfg.K) + 1) })],
+            ['control', buildArgs(row, pins, { ...cfg, control: cfg.control === 'box' ? 'aa' : 'box' })],
+            ['smoke', buildArgs(row, pins, { ...cfg, smoke: !cfg.smoke })],
+            ['row', buildArgs(row === 'push' ? 'get' : 'push', pins, cfg)],
+        ];
+        for (const [nm, a] of flips) if (acceptProbe(echoOf(a), want) !== false) bad.push(row + ': ' + nm + ' flip accepted');
+    }
+    return bad;
 }
 function selfTest() {
     const one = (row, o = {}, x = {}) => judge({
@@ -316,11 +414,20 @@ function selfTest() {
     c('MODES 1.49 not flagged, exit 0', 0, () => one('push', {}, { perComp2: { scale: { F32H: 1.49 } } }),
         (J) => J.rows[0].modes.F32H === false);
     // VOID-cell masking: a VOID row prints VOID in every ratio cell, and no ratio number
-    c('VOID row masks every ratio cell', 1, () => one('push', { bop: { RB: 16 } }), (J) => {
+    // the column-line regex and count come from S.cols, so a new column is masked or this fails
+    const colLines = (row, md) => {
+        const re = new RegExp('^\\| (' + ROWS[row].cols.join('|') + ')(\\*| \\(| \\|)');
+        return md.split('\n').filter((l) => re.test(l));
+    };
+    const masked = (row, J) => {
         const md = renderRow(J.rows[0]);
-        const rowsMd = md.split('\n').filter((l) => /^\| (RB|RB_AA|F32H|ARR|DEQ|SLOW)/.test(l));
-        return rowsMd.length === 6 && rowsMd.every((l) => { const p = l.split(' | '); return p[3] === 'VOID' && p[4] === 'VOID'; }) && !md.includes('1.200');
-    });
+        const L = colLines(row, md);
+        return L.length === ROWS[row].cols.length && L.every((l) => { const p = l.split(' | '); return p[2] === 'VOID' && p[3] === 'VOID' && p[4] === 'VOID' && p[5] === 'VOID'; }) && !md.includes('1.200');
+    };
+    c('VOID row masks every ratio cell', 1, () => one('push', { bop: { RB: 16 } }), (J) => masked('push', J));
+    for (const row of ['get', 'copyto32', 'copyto1024']) {
+        c('VOID ' + row + ' masks every cell incl CHK / MN', 1, () => one(row, { bop: { CHK: 8 } }), (J) => masked(row, J) && has(J, 'CHK B/op 8.00'));
+    }
     c('VALID row prints ratios, no VOID cell', 0, () => one('push'), (J) => {
         const md = renderRow(J.rows[0]);
         return md.includes('1.200 [') && !md.includes('| VOID |');
@@ -349,9 +456,9 @@ function selfTest() {
     });
     c('quiet host quote has no PRELIMINARY tag', 0, () => one('wrap-step'), (J) => !renderQuote(J.rows, '/x', false, 'quiet')[0].includes('PRELIMINARY'));
     // probe accept check: one baseline, one reject per clause (CONTROL is '' when --control is absent)
-    const W = { row: 'push', rb: 'aaaa1111', o1: 'bbbb2222', control: '', smoke: false, K: '21' };
-    const pj = (o = {}) => Object.assign({ row: 'push', sha8: { rb: 'aaaa1111', o1: 'bbbb2222' }, control: '', smoke: false, K: 21 }, o);
-    const acc = (name, want, j) => c('accept ' + name + ' -> ' + want, want, () => ({ exit: acceptProbe(j, W) === true ? 0 : 1 }));
+    const W = { row: 'push', rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc3333', control: '', smoke: false, K: '21' };
+    const pj = (o = {}) => Object.assign({ row: 'push', sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc3333' }, control: '', smoke: false, K: 21 }, o);
+    const acc = (name, want, j, w = W) => c('accept ' + name + ' -> ' + want, want, () => ({ exit: acceptProbe(j, w) === true ? 0 : 1 }));
     acc('baseline', 0, pj());
     acc('K 20', 1, pj({ K: 20 }));
     acc('K string', 1, pj({ K: '21' }));
@@ -359,8 +466,19 @@ function selfTest() {
     acc('j null', 1, null);
     acc('row', 1, pj({ row: 'get' }));
     acc('sha8 missing', 1, (() => { const j = pj(); delete j.sha8; return j; })());
-    acc('sha8.rb', 1, pj({ sha8: { rb: 'aaaa1112', o1: 'bbbb2222' } }));
-    acc('sha8.o1', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2223' } }));
+    acc('sha8.rb', 1, pj({ sha8: { rb: 'aaaa1112', o1: 'bbbb2222', mn: 'cccc3333' } }));
+    acc('sha8.o1', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2223', mn: 'cccc3333' } }));
+    acc('sha8.mn', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc3334' } }));
+    acc('sha8.mn missing', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222' } }));
+    acc('sha8.mn null', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: null } }));
+    acc('mn missing both sides', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222' } }), (() => { const w = { ...W }; delete w.mn; return w; })());
+    acc('mn undefined both sides', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: undefined } }), { ...W, mn: undefined });
+    acc('o1 missing both sides', 1, pj({ sha8: { rb: 'aaaa1111', mn: 'cccc3333' } }), (() => { const w = { ...W }; delete w.o1; return w; })());
+    acc('rb empty both sides', 1, pj({ sha8: { rb: '', o1: 'bbbb2222', mn: 'cccc3333' } }), { ...W, rb: '' });
+    acc('non-hex want.mn both sides', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc333g' } }), { ...W, mn: 'cccc333g' });
+    acc('uppercase want.mn both sides', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'CCCC3333' } }), { ...W, mn: 'CCCC3333' });
+    acc('9-hex want.mn both sides', 1, pj({ sha8: { rb: 'aaaa1111', o1: 'bbbb2222', mn: 'cccc33330' } }), { ...W, mn: 'cccc33330' });
+    acc('want null', 1, pj(), null);
     acc('control box', 1, pj({ control: 'box' }));
     acc('control undefined', 1, pj({ control: undefined }));
     acc('control null', 1, pj({ control: null }));
@@ -371,6 +489,87 @@ function selfTest() {
     acc('row array', 1, pj({ row: ['push'] }));
     acc('K 22', 1, pj({ K: 22 }));
     c('accept control box both -> 0', 0, () => ({ exit: acceptProbe(pj({ control: 'box', smoke: true, K: 5 }), { ...W, control: 'box', smoke: true, K: '5' }) === true ? 0 : 1 }));
+    // buildArgs -> echoOf -> acceptProbe(buildWant) end to end, per row, with every single-field flip rejected
+    const PINS = { rbPath: '/x/RingBuffer.mjs', rbSha8: 'aaaa1111', o1Path: '/x/O1.js', o1Sha8: 'bbbb2222', mnPath: '/x/circular-buffer.js', mnSha8: 'cccc3330' };
+    const ok0 = (fn) => () => ({ exit: fn() ? 0 : 1 });
+    for (const cfg of [{ K: '21', control: '', smoke: false }, { K: '5', control: 'box', smoke: true }, { K: '1001', control: 'slow', smoke: false }]) {
+        c('wiring K ' + cfg.K + ' control ' + (cfg.control || '-') + ' smoke ' + cfg.smoke + ': every row accepted, every flip rejected -> 0', 0, ok0(() => wiringFails(PINS, cfg).length === 0));
+    }
+    for (const row of ROW_LIST) {
+        c('buildWant ' + row + ' end to end -> 0', 0, ok0(() => {
+            const cfg = { K: '21', control: '', smoke: false };
+            const a = buildArgs(row, PINS, cfg), e = echoOf(a), w = buildWant(row, PINS, cfg);
+            return acceptProbe(e, w) === true && e.row === row && e.sha8.mn === 'cccc3330' && a[a.indexOf('--mn') + 1] === PINS.mnPath &&
+                a.slice(0, a.indexOf(PROBE)).join(' ') === PROBE_FLAGS.join(' ');
+        }));
+    }
+    c('wiring non-hex mn pin -> 1', 1, ok0(() => wiringFails({ ...PINS, mnSha8: 'cccc333z' }, { K: '21', control: '', smoke: false }).length === 0));
+    c('wiring missing mn pin -> 1', 1, ok0(() => wiringFails({ ...PINS, mnSha8: undefined }, { K: '21', control: '', smoke: false }).length === 0));
+    c('echoOf drops --mn-sha8 -> 1', 1, ok0(() => {
+        const a = buildArgs('push', PINS, { K: '21', control: '', smoke: false });
+        a.splice(a.indexOf('--mn-sha8'), 2);
+        return acceptProbe(echoOf(a), buildWant('push', PINS, { K: '21', control: '', smoke: false })) === true;
+    }));
+    c('echoOf unknown argument -> null', 0, ok0(() => echoOf(buildArgs('push', PINS, { K: '21', control: '', smoke: false }).concat(['--bogus', '1'])) === null));
+    // new columns: CHK (push / get / copy), MN (push / get / copy), MN_TA (copy)
+    const NEW = [['push', 'CHK'], ['get', 'CHK'], ['copyto32', 'CHK'], ['copyto1024', 'CHK'], ['push', 'MN'], ['get', 'MN'], ['copyto32', 'MN'],
+        ['copyto1024', 'MN'], ['copyto32', 'MN_TA'], ['copyto1024', 'MN_TA']];
+    for (const [row, k] of NEW) {
+        const rf = ROWS[row].ref;
+        c(row + ' ' + k + ' NaN round -> 1', 1, () => one(row, { round: [k, NaN] }), (J) => has(J, k + '/' + rf + ' not measured'));
+        c(row + ' ' + k + ' null round -> 1', 1, () => one(row, { round: [k, null] }), (J) => has(J, k + '/' + rf + ' not measured'));
+        chk('oracle ' + row + ' ' + k + ' false -> 1', row, (x) => { x.oracle[k] = false; });
+        chk('oracleAfter ' + row + ' ' + k + ' false -> 1', row, (x) => { x.oracleAfter[k] = false; });
+    }
+    chk('oracle MN missing -> 1', 'get', (x) => { delete x.oracle.MN; });
+    chk('oracleAfter MN_TA null -> 1', 'copyto32', (x) => { x.oracleAfter.MN_TA = null; });
+    for (const [row, m] of [['get', 'MUT_CHK_COUNT'], ['get', 'MUT_CHK_INT'], ['copyto32', 'MUT_CHK_BOUNDS'], ['copyto1024', 'MUT_CHK_BOUNDS'],
+        ['copyto32', 'MUT_CHK_ALIAS'], ['copyto1024', 'MUT_CHK_ALIAS'], ['copyto32', 'MUT_CHK_STALE'], ['copyto1024', 'MUT_CHK_STALE'],
+        ['copyto32', 'MUT_CHK_NOCACHE'], ['copyto1024', 'MUT_CHK_NOCACHE']]) {
+        c(row + ' ' + m + ' missed -> 1', 1, () => one(row, { checks: (x) => { x.mutants[m] = false; } }), (J) => has(J, m + ' not caught'));
+        chk(row + ' ' + m + ' null -> 1', row, (x) => { x.mutants[m] = null; });
+        chk(row + ' ' + m + ' missing -> 1', row, (x) => { delete x.mutants[m]; });
+    }
+    for (const row of ['push', 'get', 'copyto32', 'copyto1024']) {
+        const req = ROWS[row].req;
+        for (const k of req) {
+            c(row + ' ' + k + ' false -> 1', 1, () => one(row, { checks: (x) => { x[k] = false; } }), (J) => J.rows[0].voidWhy.includes(k));
+            chk(row + ' ' + k + ' null -> 1', row, (x) => { x[k] = null; });
+            chk(row + ' ' + k + ' missing -> 1', row, (x) => { delete x[k]; });
+            chk(row + ' ' + k + ' 1 (not true) -> 1', row, (x) => { x[k] = 1; });
+        }
+        c(row + ' CHK B/op 7.99 -> 0', 0, () => one(row, { bop: { CHK: 7.99 } }));
+        c(row + ' CHK B/op 8 -> 1', 1, () => one(row, { bop: { CHK: 8 } }), (J) => has(J, 'CHK B/op 8.00,8.00 not < 8'));
+        c(row + ' CHK B/op NaN -> 1', 1, () => one(row, { bop: { CHK: NaN } }));
+        c(row + ' CHK B/op null -> 1', 1, () => one(row, { bop: { CHK: null } }));
+        c(row + ' MN B/op 4200 not gated -> 0', 0, () => one(row, { bop: { MN: 4200 } }));
+    }
+    c('push chkArgs absent is not required -> 0', 0, () => one('push', { checks: (x) => { delete x.chkArgs; } }));
+    c('wrap-step chkTpl / chkArgs absent -> 0', 0, () => one('wrap-step', { checks: (x) => { delete x.chkTpl; delete x.chkArgs; } }));
+    c('wrap-push chkTpl false is not read -> 0', 0, () => one('wrap-push', { checks: (x) => { x.chkTpl = false; } }));
+    for (const row of ['copyto32', 'copyto1024']) {
+        c(row + ' MN_TA B/op 4200 not gated -> 0', 0, () => one(row, { bop: { MN_TA: 4200 } }));
+        c(row + ' MN_TA B/op 150 not gated -> 0', 0, () => one(row, { bop: { MN_TA: 150 } }));
+    }
+    c('B/op note once per table, every row', 0, () => one('push'), () => ROW_LIST.every((row) => {
+        const md = renderRow(one(row).rows[0]);
+        return md.split(BOP_NOTE).length === 2 && md.includes('V8 heap bytes per op; off-heap backing stores not counted');
+    }));
+    c('row notes: push CHK == F32H, CHK D13, copyto1024 set + copyWithin, MN_TA per-call', 0, () => one('push'), () => {
+        const md = (row) => renderRow(one(row).rows[0]);
+        return md('push').includes('CHK == F32H') && md('get').includes('GOD - CHK') && md('copyto32').includes('RB - CHK') &&
+            md('copyto1024').includes('`set` + `copyWithin`') && !md('copyto32').includes('copyWithin') && md('copyto32').includes('MN_TA allocates') &&
+            !md('wrap-step').includes('CHK') && COL_NOTE.MN_TA.includes('allocates a Float32Array per call');
+    });
+    // HOOK H: gc lane accept + exit combination (pure)
+    for (const [jx, gx, want] of [[0, 0, 0], [0, 1, 1], [1, 0, 1], [1, 1, 1], [2, 0, 2], [2, 1, 1], [0, NaN, 1], [0, null, 1],
+        [0, undefined, 1], [0, 2, 1], [null, 0, 1], [undefined, 0, 1], [NaN, 0, 1], [3, 0, 1], ['0', 0, 1]]) {
+        c('combineExit judge ' + String(jx) + ' gc ' + String(gx) + ' -> ' + want, want, () => ({ exit: combineExit(jx, gx) }));
+    }
+    for (const [st, sg, md, want] of [[0, null, true, 0], [1, null, true, 1], [0, 'SIGKILL', true, 1], [0, null, false, 1], [null, null, true, 1],
+        [null, 'SIGTERM', true, 1], [0, undefined, true, 1], [0, null, 1, 1], [0, null, undefined, 1], ['0', null, true, 1], [2, null, true, 1]]) {
+        c('acceptGc status ' + String(st) + ' signal ' + String(sg) + ' md ' + String(md) + ' -> ' + want, want, () => ({ exit: acceptGc(st, sg, md) }));
+    }
     let pass = 0;
     const lines = [];
     for (const [name, want, fn, pred] of cases) {
@@ -454,6 +653,7 @@ const T0 = new Date();
 const OUT = resolve(opt['--out'] ?? join(ROOT, '.handoff', 'bench-compare', 'compare-' + T0.toISOString().replace(/[:.]/g, '-')));
 if (existsSync(OUT) && (!statSync(OUT).isDirectory() || readdirSync(OUT).length > 0)) die('--out must be a new or empty dir: ' + OUT);
 if (!isFile(PROBE)) die('probe missing: ' + PROBE);
+if (!isFile(GC)) die('gc lane missing: ' + GC);
 
 // ---- git + sides --------------------------------------------------------------------------------------
 function git(args) {
@@ -480,6 +680,20 @@ if (!o1Pkg || o1Pkg.name !== '@zakkster/lite-o1' || !o1V) die('lite-o1 package.j
 const o1Cmp = [1, 2, 3].map((i) => Number(o1V[i])).reduce((acc, x, i) => (acc !== 0 ? acc : Math.sign(x - O1_MIN[i])), 0);
 if (o1Cmp < 0) die('lite-o1 ' + o1Ver + ' < ' + O1_MIN.join('.'));
 const o1Sha8 = sha(readFileSync(o1Path)).slice(0, 8);
+
+// mnemonist: resolve (never require: subpaths are require-only CJS), then pin version + combined digest
+let mnPath;
+try { mnPath = createRequire(join(ROOT, 'package.json')).resolve('mnemonist/circular-buffer.js'); } catch (e) { die('cannot resolve mnemonist/circular-buffer.js (npm install): ' + e.message); }
+const MN_NM = join(ROOT, 'node_modules');
+let mnReal, mnWantReal;
+try { mnReal = realpathSync(mnPath); mnWantReal = realpathSync(join(MN_NM, 'mnemonist', 'circular-buffer.js')); } catch (e) { die('mnemonist circular-buffer.js unreadable: ' + e.message); }
+if (mnReal !== mnWantReal || !isFile(mnReal)) die('mnemonist resolved outside ' + MN_NM + ': ' + mnPath);
+const mnPin = mnCheck(MN_NM);
+if (mnPin.ok !== true) {
+    die('mnemonist pin (want ' + MN_VERSION + ', obliterator ' + OBLITERATOR_VERSION + ', MN_SHA256 ' + MN_SHA256 + '): ' + mnPin.why +
+        (Array.isArray(mnPin.perFile) ? '; per-file sha256: ' + mnPin.perFile.map((p) => p.file + ' ' + p.sha256).join(', ') : ''));
+}
+const mnSha8 = MN_SHA256.slice(0, 8);
 
 // ---- stage (removed on exit, SIGINT, SIGTERM unless --keep) -------------------------------------------
 const work = mkdtempSync(join(os.tmpdir(), 'lrb-compare-'));
@@ -509,7 +723,13 @@ writeFileSync(rbPath, rbSrc);
 if (sha(readFileSync(rbPath)) !== sha(rbSrc)) die('staging RingBuffer did not round-trip');
 process.stdout.write('RingBuffer   sha256/8 ' + rbSha8 + '  git HEAD ' + headFull.slice(0, 7) + ':RingBuffer.js (worktree ' + liveState + ')\n');
 process.stdout.write('lite-o1      sha256/8 ' + o1Sha8 + '  ' + o1Ver + ' ' + o1Path + '\n');
+process.stdout.write('mnemonist    sha256/8 ' + mnSha8 + '  ' + MN_VERSION + ' (obliterator ' + mnPin.obliterator + ', ' + mnPin.perFile.length + ' files, MN_SHA256) ' + mnPath + '\n');
 process.stdout.write('work ' + work + (KEEP ? ' (kept)' : ' (removed on exit; --keep keeps it)') + '\n');
+// the argv / want / accept wiring, on the real pins, before any probe spawn
+const PINS = { rbPath, rbSha8, o1Path, o1Sha8, mnPath, mnSha8 };
+const CFG = { K, control: CONTROL, smoke: SMOKE };
+const wireBad = wiringFails(PINS, CFG);
+if (wireBad.length) die('probe argv / accept wiring: ' + wireBad.join('; '));
 try { mkdirSync(OUT, { recursive: true }); } catch (e) { die('--out: cannot create ' + OUT + ': ' + e.message); }
 
 function busyNodes() {
@@ -529,22 +749,21 @@ const host = process.env.QUIET_LOCK_HOST || 'unlocked';
 const hostWhy = process.env.QUIET_LOCK_WHY || '';
 const loadStart = os.loadavg();
 const busyStart = busyNodes();
-const probeFlags = ['--allow-natives-syntax', '--expose-gc'];
+const probeFlags = PROBE_FLAGS;
 const probeExtra = ['--K', K].concat(CONTROL ? ['--control', CONTROL] : [], SMOKE ? ['--smoke'] : []);
 const runs = ROW_LIST.map(() => []);
 let crashed = 0;
 for (let cpi = 0; cpi < COMP; cpi++) {
     for (let i = 0; i < ROW_LIST.length; i++) {
         const row = ROW_LIST[i];
-        const args = probeFlags.concat([PROBE, '--rb', rbPath, '--rb-sha8', rbSha8, '--o1', o1Path, '--o1-sha8', o1Sha8, '--row', row], probeExtra);
-        const r = await runProbe(args);
+        const r = await runProbe(buildArgs(row, PINS, CFG));
         const tag = row + ' comp ' + (cpi + 1);
         if (r.status === 2) die('probe usage error (' + tag + '): ' + String(r.stderr).trim());
         let j = null;
         if (r.status === 0 && r.signal === null) {
             try { j = JSON.parse(r.stdout); } catch { j = null; }
         }
-        if (acceptProbe(j, { row, rb: rbSha8, o1: o1Sha8, control: CONTROL, smoke: SMOKE, K })) {
+        if (acceptProbe(j, buildWant(row, PINS, CFG))) {
             runs[i].push(j);
             process.stdout.write('ran ' + tag + '\n');
         } else {
@@ -553,17 +772,29 @@ for (let cpi = 0; cpi < COMP; cpi++) {
         }
     }
 }
+// GC lane (HOOK H): same staged RB / pins, OUT = this run's dir (created empty above)
+const gcArgs = [GC, '--out', OUT, '--rb', rbPath, '--rb-sha8', rbSha8, '--o1', o1Path, '--o1-sha8', o1Sha8, '--mn', mnPath, '--mn-sha8', mnSha8].concat(SMOKE ? ['--smoke'] : []);
+const g = await runProbe(gcArgs);
+if (g.status === 2) die('gc lane usage error: ' + String(g.stderr).trim());
+const GC_MD = join(OUT, 'compare-gc.md');
+const gcMdExists = isFile(GC_MD);
+const gcExit = acceptGc(g.status, g.signal, gcMdExists);
+process.stdout.write('ran gc lane: status ' + g.status + ' signal ' + g.signal + (gcMdExists ? '' : ' (no compare-gc.md)') + '\n');
+if (gcExit !== 0) process.stderr.write('gc lane VOID: ' + String(g.stderr || g.error || '').slice(0, 400) + '\n');
 const loadEnd = os.loadavg();
 const busyEnd = busyNodes();
 const T1 = new Date();
 
 // ---- judge + write ------------------------------------------------------------------------------------
 const J = judge({ rows: ROW_LIST, runs, comp: COMP, smoke: SMOKE, host, crashed });
-const tier = SMOKE ? 'SMOKE: not quotable' : J.exit === 0 ? 'REPORTED (QUIET host, every row VALID)' : J.exit === 2 ? 'PRELIMINARY / NO VERDICT (host not quiet)' : 'VOID rows present';
+const exitAll = combineExit(J.exit, gcExit);
+if (gcExit !== 0) J.why.push('VOID gc-lane: exit ' + g.status + (g.signal ? ' signal ' + g.signal : '') + (gcMdExists ? '' : '; compare-gc.md missing'));
+const tier = SMOKE ? 'SMOKE: not quotable' : exitAll === 0 ? 'REPORTED (QUIET host, every row VALID, gc lane VALID)' : exitAll === 2 ? 'PRELIMINARY / NO VERDICT (host not quiet)' :
+    J.exit === 1 ? 'VOID rows present' : 'gc lane VOID';
 const p0 = runs.find((r) => r.length)?.[0] || {};
 const cpus = os.cpus();
 const l3 = (l) => l.map((x) => f(x)).join(' / ');
-let md = '### compare -- ' + tier + ' -- exit ' + J.exit + '\n\n';
+let md = '### compare -- ' + tier + ' -- exit ' + exitAll + '\n\n';
 md += '- Run: ' + T0.toISOString() + ' .. ' + T1.toISOString() + ' (' + f((T1 - T0) / 1000, 1) + ' s wall)\n';
 md += '- Host: ' + os.type() + ' ' + os.release() + ' ' + os.arch() + '; ' + (cpus[0] ? cpus[0].model : '?') + ' x ' + cpus.length + ' cores\n';
 md += '- Load1/5/15: start ' + l3(loadStart) + ', end ' + l3(loadEnd) + '\n';
@@ -571,21 +802,27 @@ md += '- Other node >= 10% CPU: start ' + (busyStart.length ? busyStart.join('; 
 md += '- Node ' + (p0.node || process.version) + ' / V8 ' + (p0.v8 || process.versions.v8) + '; K ' + K + ' x ' + COMP + ' compilation(s)' + (SMOKE ? ' (smoke: reps capped 1e5)' : '') + (CONTROL ? '; control ' + CONTROL : '') + '\n';
 md += '- argv: ' + JSON.stringify(process.argv.slice(1)) + '; execArgv: ' + JSON.stringify(process.execArgv) + '; probe flags: ' + probeFlags.concat(probeExtra).join(' ') + '\n';
 md += '- QUIET_LOCK_HOST ' + host + ' (host quiet at start: lock-time check; end load / busy nodes recorded, not judged); QUIET_LOCK_WHY ' + (hostWhy || '-') + '\n';
-md += '- RingBuffer: HEAD ' + headFull.slice(0, 7) + ', RingBuffer.js sha256/8 ' + rbSha8 + ' (worktree ' + liveState + '); lite-o1 ' + o1Ver + ', O1.js sha256/8 ' + o1Sha8 + '\n\n';
+md += '- RingBuffer: HEAD ' + headFull.slice(0, 7) + ', RingBuffer.js sha256/8 ' + rbSha8 + ' (worktree ' + liveState + '); lite-o1 ' + o1Ver + ', O1.js sha256/8 ' + o1Sha8 + '\n';
+md += '- mnemonist ' + MN_VERSION + ' (exact devDependency; obliterator ' + mnPin.obliterator + '), MN_SHA256/8 ' + mnSha8 + ' over ' + mnPin.perFile.length +
+    ' files (' + mnPin.perFile.map((p) => p.file + ' ' + p.sha256.slice(0, 8)).join(', ') + '); ' + mnPath + '\n\n';
 md += 'RingDeque (@zakkster/lite-o1) is a Float64 double-ended queue that throws when full or on NaN; it is measured here as a ' +
     'keep-last-N window (`if (size === capacity) popFront(); pushBack(v)`; bulk copy through `forEach` with a hoisted store ' +
     'callback). Columns marked * are such emulations. Ratios against hand-rolled columns include driver-inlining effects (D13).\n\n';
-md += 'B/op resolution: < 8 = no per-call 16 B box; 0 B/op is proven only by `npm run alloc`. MODES = a column\'s per-compilation ns/op max/min >= ' + MODES_RATIO + ' (D17).\n\n';
+md += 'MN / MN_TA = mnemonist CircularBuffer through its own API (push; get(size - 1 - i); forEach with a hoisted store callback; ' +
+    'toArray + set). MN / MN_TA B/op is reported, not gated. CHK = F32H plus RingBuffer\'s argument checks copied as text (D13 applies to RB - CHK).\n\n';
+md += 'B/op = V8 heap bytes per op (v8 total_allocated_bytes); off-heap backing stores not counted. Resolution: < 8 = no per-call 16 B box; 0 B/op is proven only by `npm run alloc`. MODES = a column\'s per-compilation ns/op max/min >= ' + MODES_RATIO + ' (D17).\n\n';
 for (const r of J.rows) md += renderRow(r);
+md += gcMdExists ? readFileSync(GC_MD, 'utf8').replace(/\n*$/, '\n\n') : '### GC lane -- no compare-gc.md (status ' + g.status + ', signal ' + g.signal + ')\n\n';
 const quotes = renderQuote(J.rows, OUT, SMOKE, host);
-md += quotes.join('\n') + '\n\nJudge: exit ' + J.exit + (J.why.length ? '\n' + J.why.map((w) => '- ' + w).join('\n') : ' (no findings)') + '\n';
+md += quotes.join('\n') + '\n\nJudge: exit ' + exitAll + (J.why.length ? '\n' + J.why.map((w) => '- ' + w).join('\n') : ' (no findings)') + '\n';
 writeFileSync(join(OUT, 'compare.json'), JSON.stringify({ t0: T0, t1: T1, wallS: (T1 - T0) / 1000, host, hostWhy, loadStart, loadEnd, busyStart, busyEnd,
     os: { type: os.type(), release: os.release(), arch: os.arch(), cpu: cpus[0] ? cpus[0].model : '', cores: cpus.length },
     K: Number(K), comp: COMP, smoke: SMOKE, control: CONTROL, argv: process.argv.slice(1), execArgv: process.execArgv, probeFlags: probeFlags.concat(probeExtra),
     head: headFull, rbSha8, liveState, o1: { version: o1Ver, sha8: o1Sha8, path: o1Path },
-    exit: J.exit, why: J.why, quotes,
+    mn: { version: MN_VERSION, sha8: mnSha8, files: mnPin.perFile, obliterator: mnPin.obliterator },
+    exit: exitAll, why: J.why, quotes, gc: { exit: g.status, file: gcMdExists ? GC_MD : null },
     rows: J.rows.map((r) => (r.verdict === 'VOID' ? { ...r, st: 'VOID', perComp: 'VOID', ns: 'VOID', perCompNs: 'VOID' } : r)), raw: runs }, null, 1));
 writeFileSync(join(OUT, 'compare.md'), md);
 process.stdout.write(md);
-process.stdout.write('compare: exit ' + J.exit + (KEEP ? '; work dir kept: ' + work : '') + '\n');
-process.exit(J.exit);
+process.stdout.write('compare: exit ' + exitAll + (KEEP ? '; work dir kept: ' + work : '') + '\n');
+process.exit(exitAll);
