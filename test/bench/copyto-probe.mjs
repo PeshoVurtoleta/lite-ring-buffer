@@ -61,13 +61,15 @@ for (const k of ['--before', '--before-sha8', '--after', '--after-sha8', '--n', 
 const n = Number(opt['--n']);
 const dstKind = opt['--dst'];
 const layout = opt['--layout'];
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction (same text as compare.mjs's CANON_INT)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
 const K = Number(opt['--K'] ?? '21');
 const NO_FAST = opt['--no-fast'] === true;
 const CONTROL = opt['--control'] ?? '';
 if (!/^[0-9]+$/.test(opt['--n']) || !(n >= 32 && n <= 4096) || (n & (n - 1)) !== 0) die(2, '--n must be a power of two in 32..4096');
 if (dstKind !== 'f32' && dstKind !== 'f64') die(2, '--dst f32|f64');
 if (layout !== 'contig' && layout !== 'wrap' && layout !== 'part') die(2, '--layout contig|wrap|part');
-if (!/^[0-9]+$/.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be an integer 5..1001');
+if (!CANON_INT.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be a canonical integer 5..1001');
 if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'view') die(2, '--control box|view');
 
 // ---- preconditions (fail closed) ----------------------------------------------------------------------

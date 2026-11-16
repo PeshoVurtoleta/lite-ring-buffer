@@ -71,13 +71,15 @@ for (const k of ['--ref', '--ref-sha8', '--cand', '--cand-sha8', '--chunk', '--s
 const N = Number(opt['--chunk']);
 const srcKind = opt['--src'];
 const layout = opt['--layout'];
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction (same text as compare.mjs's CANON_INT)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
 const K = Number(opt['--K'] ?? '21');
 const CONTROL = opt['--control'] ?? '';
 if (!/^[0-9]+$/.test(opt['--chunk']) || !(N >= 1 && N <= 4096) || (N & (N - 1)) !== 0) die(2, '--chunk must be a power of two in 1..4096');
 if (srcKind !== 'f32' && srcKind !== 'f64') die(2, '--src f32|f64');
 if (layout !== 'whole' && layout !== 'slice' && layout !== 'over') die(2, '--layout whole|slice|over');
 if (layout === 'over' && !(N >= 32)) die(2, '--layout over needs --chunk >= 32');
-if (!/^[0-9]+$/.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be an integer 5..1001');
+if (!CANON_INT.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be a canonical integer 5..1001');
 if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'aa') die(2, '--control box|aa');
 
 // ---- preconditions (fail closed) ----------------------------------------------------------------------

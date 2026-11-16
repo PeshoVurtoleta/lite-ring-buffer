@@ -72,6 +72,8 @@ for (const k of ['--ref', '--ref-sha8', '--cand', '--cand-sha8', '--kind', '--ca
     if (!(k in opt)) die(2, k + ' is required');
 }
 const INT = /^[0-9]+$/;
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction (same text as compare.mjs's CANON_INT)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
 const KIND = opt['--kind'];
 const CAP = Number(opt['--cap']);
 const HEAD = Number(opt['--head']);
@@ -85,7 +87,7 @@ if (!INT.test(opt['--head']) || !(HEAD >= 0 && HEAD < CAP)) die(2, '--head must 
 if (!INT.test(opt['--n']) || !(N >= 4 && N <= CAP)) die(2, '--n must be an integer 4..cap');
 if (KIND === 'parity' && N !== CAP) die(2, '--kind parity needs --n equal to --cap (copyLast(count) vs copyTo)');
 if (dstKind !== 'f32' && dstKind !== 'f64') die(2, '--dst f32|f64');
-if (!INT.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be an integer 5..1001');
+if (!CANON_INT.test(opt['--K'] ?? '21') || !(K >= 5 && K <= 1001)) die(2, '--K must be a canonical integer 5..1001');
 if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'aa') die(2, '--control box|aa');
 
 // ---- preconditions (fail closed) ----------------------------------------------------------------------

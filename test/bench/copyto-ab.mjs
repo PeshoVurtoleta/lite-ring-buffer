@@ -219,6 +219,28 @@ function selfTest() {
         ['probe crash -> 1', 1, () => one(C, {}, { crashed: 1 })],
         ['void beats host -> 1', 1, () => one(C, { bop: { CAND: 16 } }, { host: 'preliminary' })],
     ];
+    // --K is one canonical-integer rule here and in copyto-probe.mjs (CANON_INT, same text as compare.mjs).
+    // The source rows read the files; the selfTest body is cut out first so its own literals never match.
+    const okIf = (b) => ({ exit: b === true ? 0 : 1 });
+    const canonLine = 'const CANON_INT = /' + CANON_INT.source + '/;';
+    const count = (s, t) => s.split(t).length - 1;
+    cases.push(['driver --K: one CANON_INT line, CANON_INT.test(K), no other .test(K)', 0, () => {
+        const own = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+        const st = String(selfTest);
+        if (count(own, st) !== 1) return okIf(false);
+        const body = own.replace(st, '');
+        return okIf(CANON_INT.source === '^(?:0|[1-9][0-9]*)$' &&
+            body.split('\n').filter((l) => l === canonLine).length === 1 &&
+            count(body, 'CANON_INT.test(K)') === 1 && count(body, '.test(K)') === 1);
+    }]);
+    cases.push(['copyto-probe.mjs --K: one CANON_INT line, CANON_INT.test(--K), no other --K test', 0, () => {
+        const src = readFileSync(PROBE, 'utf8');
+        return okIf(src.split('\n').filter((l) => l === canonLine).length === 1 &&
+            count(src, "CANON_INT.test(opt['--K'] ?? '21')") === 1 && count(src, ".test(opt['--K']") === 1);
+    }]);
+    cases.push(['CANON_INT rejects 021 0021 +21 21.0 2e1 " 21" "", accepts 0 5 21 1001', 0, () => okIf(
+        ['021', '0021', '+21', '21.0', '2e1', ' 21', ''].every((s) => !CANON_INT.test(s)) &&
+        ['0', '5', '21', '1001'].every((s) => CANON_INT.test(s)))]);
     let pass = 0;
     const lines = [];
     for (const [name, want, fn] of cases) {
@@ -240,6 +262,8 @@ function selfTest() {
 // ---- options ------------------------------------------------------------------------------------------
 const VALUE_OPTS = ['--before-ref', '--before', '--after', '--sizes', '--K', '--comp', '--out', '--control'];
 const FLAG_OPTS = ['--no-fast', '--keep', '--self-test'];
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction (same text as compare.mjs's CANON_INT)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
 function lev(a, b) {
     const d = [];
     for (let i = 0; i <= a.length; i++) d.push([i]);
@@ -291,7 +315,7 @@ for (let k = 0; k < SIZES.length; k++) {
     if (SIZES.indexOf(s) !== k) die('--sizes: ' + s + ' given twice');
 }
 const K = opt['--K'] ?? '21';
-if (!/^[0-9]+$/.test(K) || !(Number(K) >= 5 && Number(K) <= 1001)) die('--K: want an integer 5..1001');
+if (!CANON_INT.test(K) || !(Number(K) >= 5 && Number(K) <= 1001)) die('--K: want a canonical integer 5..1001');
 const COMP_S = opt['--comp'] ?? '3';
 if (!/^[0-9]+$/.test(COMP_S) || !(Number(COMP_S) >= 1 && Number(COMP_S) <= 10)) die('--comp: want an integer 1..10');
 const COMP = Number(COMP_S);
