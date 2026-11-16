@@ -20,7 +20,9 @@
 // a NaN or null numeric field; bpfWin not W finite numbers (window 0 included, never judged); mem M not the
 // schedule's; oracle {before, after} not both true;
 // leak.live != 0; RB not (major 0, minor 0, floor 0 <= baseBpf < 8 AND net B/frame = bpf - baseBpf < 8, all
-// finite, noGc 'pass') (SPEC A10 + A12: baseBpf carries the counter-read floor); CTL not (minor >= 1 and RAW
+// finite, noGc 'pass') (SPEC A10 + A12: baseBpf carries the counter-read floor; the floor test is rbFloorOk, pure and
+// self-tested on its own, NaN / null / non-number / -0 / 8 / 7.99 rows, so it stays NaN-closed even behind the
+// GC_NUM finiteness check); CTL not (minor >= 1 and RAW
 // B/frame >= 128) at every n; perInstB < 4n (RB, F32H, MN) or < 8n (ARR, DEQ). MN_ARR and the other gc libs
 // are REPORTED, no bound. A VOID cell prints VOID in every value column.
 // B/frame is V8 heap bytes per frame (total_allocated_bytes): an off-heap typed-array backing store is NOT
@@ -133,6 +135,8 @@ function accept(j, want) {
 
 // ---- the judge (pure) ---------------------------------------------------------------------------------
 const oracleGc = (o) => isObj(o) && o.before === true && o.after === true;
+// RB floor (A12, pure): 0 <= baseBpf < RB_BPF_MAX, NaN-closed (a non-number is NaN via num, so it fails)
+const rbFloorOk = (x) => { const b = num(x); return b >= 0 && b < RB_BPF_MAX; };
 function judgeCell(want, c, smoke) {
     const S = SCHED(smoke);
     const v = [];
@@ -151,7 +155,7 @@ function judgeCell(want, c, smoke) {
                 if (!(num(j.major) === 0)) v.push('RB major ' + String(j.major) + ' != 0');
                 if (!(num(j.minor) === 0)) v.push('RB minor ' + String(j.minor) + ' != 0');
                 const base = num(j.baseBpf), net = num(j.bpf) - base;
-                if (!(base >= 0 && base < RB_BPF_MAX)) v.push('RB floor B/frame ' + f(base) + ' not in [0, ' + RB_BPF_MAX + ')');
+                if (!rbFloorOk(j.baseBpf)) v.push('RB floor B/frame ' + f(base) + ' not in [0, ' + RB_BPF_MAX + ')');
                 if (!(net < RB_BPF_MAX)) v.push('RB net B/frame ' + f(net) + ' (raw ' + f(num(j.bpf)) + ' - floor ' + f(num(j.baseBpf)) + ') not < ' + RB_BPF_MAX);
                 if (!(j.noGc === 'pass')) v.push('RB noGc ' + String(j.noGc) + ' != pass');
             }
@@ -355,6 +359,13 @@ function selfTest() {
         c('RB n' + n + ' bpf 20 floor 14 (net 6) -> 1', 1, () => rbf(20, 14), (J) => has(J, 'RB floor B/frame 14.00') && !has(J, 'RB net'));
         c('RB n' + n + ' floor 0 net 7.99 -> 0', 0, () => rbf(7.99, 0));
         c('RB n' + n + ' floor 7.99 net 7.99 -> 0', 0, () => rbf(15.98, 7.99));
+    }
+    // the floor line itself (rbFloorOk), with no finiteness gate in front of it: a NaN-open rewrite
+    // (`base < 0 || base >= RB_BPF_MAX`) passes NaN / null / undefined / a string, and only these rows see it
+    for (const [x, want] of [[NaN, false], [null, false], [undefined, false], ['0', false], ['7', false], [true, false], [Infinity, false],
+        [-Infinity, false], [-0.5, false], [8, false], [8.01, false], [-0, true], [0, true], [0.1, true], [7.99, true]]) {
+        const nm = typeof x === 'string' ? JSON.stringify(x) : Object.is(x, -0) ? '-0' : String(x);
+        c('rbFloorOk ' + nm + ' -> ' + want, 0, () => ({ exit: 0 }), () => rbFloorOk(x) === want);
     }
     // perInstB >= 4n (RB, F32H, MN) / >= 8n (ARR, DEQ)
     for (const lib of MEM_LIBS) {

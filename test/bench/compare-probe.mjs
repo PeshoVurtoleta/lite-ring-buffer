@@ -48,11 +48,13 @@
 // checks.chkTpl (push, get, copyto): CHK source == the stated transform of F32H's source. checks.chkArgs (get,
 // copyto): untimed functions built from the SAME guard text agree with the staged RingBuffer's
 // getOrDefault(x, 0) / copyTo(dst, off) (outcome `ok` + value / count, or the error class; Object.is) on mirrored
-// rings (empty, count = n/2 + 3, full, `data` replaced with a wrong-length array, `data` swapped for a same-value
-// full-length array after a cache-warming copy with the old array as dst) over the offset / dst / dstOffset sets
-// below; after every ok outcome both alias caches must agree on being keyed on the current `data`. Mutants
-// MUT_CHK_COUNT / MUT_CHK_INT (get) and MUT_CHK_BOUNDS / MUT_CHK_ALIAS / MUT_CHK_STALE / MUT_CHK_NOCACHE (copy)
-// are guard mutants: caught means the ARG oracle fails on their guard text (the driver oracle never sees a bad arg).
+// rings (empty, count = n/2 + 3, full, full after a cache-warming copy with `data` kept (copy rows only: the next
+// copy reads the CACHED buffer, so dst = `data` must still throw the alias RangeError), `data` replaced with a
+// wrong-length array, `data` swapped for a same-value full-length array after a cache-warming copy with the old
+// array as dst) over the offset / dst / dstOffset sets below; after every ok outcome both alias caches must agree on
+// being keyed on the current `data`. Mutants MUT_CHK_COUNT / MUT_CHK_INT (get) and MUT_CHK_BOUNDS / MUT_CHK_ALIAS /
+// MUT_CHK_STALE / MUT_CHK_NOCACHE / MUT_CHK_NOBUF (copy) are guard mutants: caught means the ARG oracle fails on their
+// guard text (the driver oracle never sees a bad arg).
 // Push values come from a Float64Array of float32-exact non-NaN values incl. -0, +Infinity, -Infinity.
 // Oracle before AND after timing: every timed column vs a keep-last-N model built from the TRUE definition
 // (Math.fround, Object.is), on fresh rings. Mutants (never timed): MUT_WRAP (& (mask >> 1)), MUT_OBO
@@ -295,9 +297,11 @@ const MUT_G = {
     MUT_CHK_INT: [G_GET, '!Number.isInteger(o) || ', ''],
     MUT_CHK_BOUNDS: [G_COPY, '!(dstOffset + c <= dlen)', '!(dstOffset + c < dlen)'],
     MUT_CHK_ALIAS: [G_COPY, 'TA_BUFFER.call(dst) === buf', 'dst === data'],
-    // alias-cache mutants (SPEC A11 c): a stale cache key, and a cache that never records its key
+    // alias-cache mutants (SPEC A11 c): a stale cache key, a cache that never records its key, and one that records
+    // the key but never the buffer (a cache hit then alias-checks against a stale `_buf`; caught by the 'warm' state)
     MUT_CHK_STALE: [G_COPY, 'data !== ring._bufOf', 'ring._bufOf === null'],
     MUT_CHK_NOCACHE: [G_COPY, '\n            ring._bufOf = data;', ''],
+    MUT_CHK_NOBUF: [G_COPY, '\n            ring._buf = buf;', ''],
 };
 function mutGuard(nm) {
     const [g, a, b] = MUT_G[nm];
@@ -344,6 +348,7 @@ const ROWDEF = {
         MUT_CHK_ALIAS: { kind: 'chk', intr: true, guard: mutGuard('MUT_CHK_ALIAS'), pre: PRE_T, body: CHK_COPY(mutGuard('MUT_CHK_ALIAS')) },
         MUT_CHK_STALE: { kind: 'chk', intr: true, guard: mutGuard('MUT_CHK_STALE'), pre: PRE_T, body: CHK_COPY(mutGuard('MUT_CHK_STALE')) },
         MUT_CHK_NOCACHE: { kind: 'chk', intr: true, guard: mutGuard('MUT_CHK_NOCACHE'), pre: PRE_T, body: CHK_COPY(mutGuard('MUT_CHK_NOCACHE')) },
+        MUT_CHK_NOBUF: { kind: 'chk', intr: true, guard: mutGuard('MUT_CHK_NOBUF'), pre: PRE_T, body: CHK_COPY(mutGuard('MUT_CHK_NOBUF')) },
     } },
     'wrap-step': { form: 'step', ref: 'MASK', aa: 'MASK_AA', cols: {
         MASK: { kind: 'f32', pre: PRE_STEP, post: POST_STEP, body: T.step(W_MASK) },
@@ -510,7 +515,8 @@ function chkFn(guard) {
     chkFnCache.set(guard, fn);
     return fn;
 }
-const ARG_STATES = ['empty', 'half', 'full', 'badData', 'swapData'];
+// 'warm' (copy rows only): full, then one cache-warming copy with `data` kept, so every case below runs on a cache HIT
+const ARG_STATES = ['empty', 'half', 'full', 'warm', 'badData', 'swapData'];
 function argPair(state, fn) {
     const rb = new RingBuffer(n);
     const ck = mkChk(new Float32Array(n), n);
@@ -523,10 +529,11 @@ function argPair(state, fn) {
         if (ck.count < ck.capacity) ck.count++;
     }
     const oldA = rb.data, oldB = ck.data;
-    if (state === 'badData' || state === 'swapData') {
+    if (state === 'warm' || state === 'badData' || state === 'swapData') {
         // copy rows: warm both alias caches with a valid copy first (through the function under test), then
-        // replace `data`: badData with a wrong-length array; swapData (SPEC A11 a) with a new full-length array
-        // holding the same values (the cache key goes stale; dst 'oldData' = the replaced array)
+        // keep `data` (warm: every case hits the cache) or replace it: badData with a wrong-length array; swapData
+        // (SPEC A11 a) with a new full-length array holding the same values (the cache key goes stale; dst 'oldData' =
+        // the replaced array)
         if (FORM === 'copy') {
             rb.copyTo(new Float32Array(n), 0);
             try { fn(ck, new Float32Array(n), 0); } catch { /* a mutant may throw here; the cases below judge it */ }
@@ -536,7 +543,7 @@ function argPair(state, fn) {
             for (let i = 0; i < a.length; i++) { a[i] = i + 0.25; b[i] = i + 0.25; }
             rb.data = a;
             ck.data = b;
-        } else {
+        } else if (state === 'swapData') {
             rb.data = Float32Array.from(oldA);
             ck.data = Float32Array.from(oldB);
         }
@@ -569,7 +576,8 @@ const fmt = (x) => (typeof x === 'string' ? JSON.stringify(x) : Object.is(x, -0)
 function argOracle(guard, label) {
     const fn = chkFn(guard);
     for (const st of ARG_STATES) {
-        const cnt = st === 'empty' ? 0 : st === 'half' ? (n >> 1) + 3 : n; // full, badData, swapData: n
+        if (st === 'warm' && FORM !== 'copy') continue; // get has no cache: 'warm' would repeat 'full'
+        const cnt = st === 'empty' ? 0 : st === 'half' ? (n >> 1) + 3 : n; // full, warm, badData, swapData: n
         if (FORM === 'get') {
             for (const o of ARG_OFFSETS(cnt)) {
                 const { rb, ck } = argPair(st, fn);

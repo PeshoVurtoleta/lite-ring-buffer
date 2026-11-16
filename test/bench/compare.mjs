@@ -8,9 +8,16 @@
 //   node test/bench/compare.mjs --smoke [--out DIR] [--control box|aa|slow] [--keep]
 //   node test/bench/compare.mjs --self-test
 //
+// Options (parseOpts, pure, self-tested; every error is exit 2 BEFORE the self-test runs): --K and --comp are
+// canonical decimal integers (no sign, no leading zero, no exponent) in 5..1001 / 1..10; --control box|aa|slow;
+// --smoke takes no --K / --comp; --self-test takes no other argument (each given value is validated first, so
+// `--self-test --K 4` names --K). An unknown option gets a did-you-mean hint.
 // Sides: RingBuffer = `git show HEAD:RingBuffer.js`, staged into a fresh mkdtemp dir `lrb-compare-*` as
-// RingBuffer.mjs (removed on exit, also on SIGINT / SIGTERM, unless --keep; probes are spawned async so a
-// signal is handled between and during probes: the running probe is killed, then the dir is removed); RingDeque = the installed
+// RingBuffer.mjs (removed on exit, also on SIGINT / SIGTERM, unless --keep; probes and the gc lane are spawned async,
+// so a signal is handled between and during them). On SIGINT / SIGTERM (signalPlan, pure, self-tested) the signal is
+// FORWARDED to the running child (so the gc lane's own handler runs and kills ITS child), compare waits up to
+// SIGNAL_GRACE_MS for the child's exit, SIGKILLs it after that (or on a second signal), then exits 130 / 143 and the
+// dir is removed; RingDeque = the installed
 // devDependency @zakkster/lite-o1 (>= 1.11.3), resolved here and passed to the probe with its sha256/8
 // (the probe fails closed on a mismatch); MN / MN_TA = the devDependency mnemonist, EXACT 0.40.8 (mn-pin.mjs):
 // circular-buffer.js is resolved with createRequire from ROOT/package.json (its subpaths are require-only),
@@ -42,7 +49,8 @@
 // Exit (exitAll, pure: combineExit(judge exit, gc lane)): 0 = every row VALID and the gc lane VALID on a QUIET
 // host (QUIET_LOCK_HOST=quiet from quiet-lock.mjs); 1 = any VOID row, a VOID gc lane (or a red self-test);
 // 2 = usage / git / staging error or host not quiet.
-// The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases;
+// The judge is pure; NaN (and a JSON null) fails every comparison. --self-test runs its synthetic cases (incl.
+// parseOpts and signalPlan rows);
 // every real run runs them first, before any spawn. The probe argv (buildArgs), the expected echo (buildWant),
 // the probe's echo of an argv (echoOf) and the probe-output accept check (acceptProbe: row, the three sha256/8,
 // control, smoke, K; every want sha8 must be 8 lowercase hex) are pure and self-tested end to end; a real run
@@ -77,7 +85,7 @@ const SLOW_Q1_MIN = 1.3;
 const MODES_RATIO = 1.5;
 // req = probe checks that must be === true (anything else -> VOID); gated = B/op < 8 columns beyond REF / REF_AA / SLOW
 const COPY_COLS = ['RB', 'RB_AA', 'F32H', 'CHK', 'ARR', 'DEQ', 'MN', 'MN_TA', 'SLOW'];
-const COPY_MUTS = ['MUT_WRAP', 'MUT_OBO', 'MUT_CHK_BOUNDS', 'MUT_CHK_ALIAS', 'MUT_CHK_STALE', 'MUT_CHK_NOCACHE'];
+const COPY_MUTS = ['MUT_WRAP', 'MUT_OBO', 'MUT_CHK_BOUNDS', 'MUT_CHK_ALIAS', 'MUT_CHK_STALE', 'MUT_CHK_NOCACHE', 'MUT_CHK_NOBUF'];
 const ROWS = {
     push: { label: 'push n1024', ref: 'RB', aa: 'RB_AA', cols: ['RB', 'RB_AA', 'F32H', 'CHK', 'ARR', 'DEQ', 'MN', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_OBO'], tpl: 'sameTpl', boxCols: [], req: ['chkTpl'], gated: ['CHK'] },
     get: { label: 'get n1024', ref: 'GOD', aa: 'GOD_AA', cols: ['GOD', 'GOD_AA', 'GET', 'F32H', 'CHK', 'ARR', 'MN', 'SLOW'], mutants: ['MUT_WRAP', 'MUT_GET', 'MUT_OBO', 'MUT_CHK_COUNT', 'MUT_CHK_INT'], tpl: 'sameTpl', boxCols: ['GET'], req: ['chkTpl', 'chkArgs'], gated: ['CHK'] },
@@ -525,7 +533,7 @@ function selfTest() {
     chk('oracleAfter MN_TA null -> 1', 'copyto32', (x) => { x.oracleAfter.MN_TA = null; });
     for (const [row, m] of [['get', 'MUT_CHK_COUNT'], ['get', 'MUT_CHK_INT'], ['copyto32', 'MUT_CHK_BOUNDS'], ['copyto1024', 'MUT_CHK_BOUNDS'],
         ['copyto32', 'MUT_CHK_ALIAS'], ['copyto1024', 'MUT_CHK_ALIAS'], ['copyto32', 'MUT_CHK_STALE'], ['copyto1024', 'MUT_CHK_STALE'],
-        ['copyto32', 'MUT_CHK_NOCACHE'], ['copyto1024', 'MUT_CHK_NOCACHE']]) {
+        ['copyto32', 'MUT_CHK_NOCACHE'], ['copyto1024', 'MUT_CHK_NOCACHE'], ['copyto32', 'MUT_CHK_NOBUF'], ['copyto1024', 'MUT_CHK_NOBUF']]) {
         c(row + ' ' + m + ' missed -> 1', 1, () => one(row, { checks: (x) => { x.mutants[m] = false; } }), (J) => has(J, m + ' not caught'));
         chk(row + ' ' + m + ' null -> 1', row, (x) => { x.mutants[m] = null; });
         chk(row + ' ' + m + ' missing -> 1', row, (x) => { delete x.mutants[m]; });
@@ -570,6 +578,48 @@ function selfTest() {
         [null, 'SIGTERM', true, 1], [0, undefined, true, 1], [0, null, 1, 1], [0, null, undefined, 1], ['0', null, true, 1], [2, null, true, 1]]) {
         c('acceptGc status ' + String(st) + ' signal ' + String(sg) + ' md ' + String(md) + ' -> ' + want, want, () => ({ exit: acceptGc(st, sg, md) }));
     }
+    // CLI (parseOpts, pure): exit 2 = { err }; every value checked before the --self-test exit; canonical integers only
+    const po = (name, want, argv, pred) => c('opts ' + name + ' -> ' + want, want, () => { const r = parseOpts(argv); return { exit: r.err ? 2 : 0, r }; },
+        pred ? (J) => pred(J.r) === true : undefined);
+    const errHas = (s) => (r) => typeof r.err === 'string' && r.err.includes(s);
+    po('no argument (defaults K 21, comp 3)', 0, [], (r) => r.cfg.K === '21' && r.cfg.comp === 3 && r.cfg.control === '' && r.cfg.smoke === false && r.cfg.out === undefined);
+    po('--self-test alone', 0, ['--self-test'], (r) => r.opt['--self-test'] === true);
+    po('--self-test --K 4 names --K', 2, ['--self-test', '--K', '4'], errHas('--K: want a canonical integer 5..1001'));
+    po('--self-test --comp 0 names --comp', 2, ['--self-test', '--comp', '0'], errHas('--comp: want'));
+    po('--self-test --control bogus names --control', 2, ['--self-test', '--control', 'bogus'], errHas('--control: box, aa or slow'));
+    po('--self-test --K 21 (valid, run-only)', 2, ['--self-test', '--K', '21'], errHas('--self-test takes no other argument'));
+    po('--self-test --smoke', 2, ['--self-test', '--smoke'], errHas('--self-test takes no other argument'));
+    po('--self-test --out /x', 2, ['--self-test', '--out', '/x'], errHas('--self-test takes no other argument'));
+    for (const k of ['21', '5', '1001', '100']) po('--K ' + k, 0, ['--K', k], (r) => r.cfg.K === k);
+    for (const k of ['0021', '05', '021', '4', '1002', '0', '-5', '+5', '5.0', '5.', '1e3', ' 21', '21 ', '0x15', '21a', '\u0661\u0662']) {
+        po('--K ' + JSON.stringify(k), 2, ['--K', k], errHas('--K: want'));
+    }
+    for (const k of ['1', '3', '10']) po('--comp ' + k, 0, ['--comp', k], (r) => r.cfg.comp === Number(k));
+    for (const k of ['01', '010', '0', '11', '-1', '1.0', '1e1']) po('--comp ' + JSON.stringify(k), 2, ['--comp', k], errHas('--comp: want'));
+    for (const k of ['box', 'aa', 'slow']) po('--control ' + k, 0, ['--control', k], (r) => r.cfg.control === k);
+    for (const k of ['BOX', 'none', '__proto__', 'toString']) po('--control ' + k, 2, ['--control', k], errHas('--control: box'));
+    po('--smoke -> K 5 comp 1', 0, ['--smoke'], (r) => r.cfg.K === '5' && r.cfg.comp === 1 && r.cfg.smoke === true);
+    po('--smoke --K 5', 2, ['--smoke', '--K', '5'], errHas('--smoke fixes K 5'));
+    po('--smoke --comp 1', 2, ['--smoke', '--comp', '1'], errHas('--smoke fixes K 5'));
+    po('--smoke --K 0021 names --K', 2, ['--smoke', '--K', '0021'], errHas('--K: want'));
+    po('--K 21 --comp 2 --control aa --keep --out /x', 0, ['--K', '21', '--comp', '2', '--control', 'aa', '--keep', '--out', '/x'],
+        (r) => r.cfg.K === '21' && r.cfg.comp === 2 && r.cfg.control === 'aa' && r.cfg.keep === true && r.cfg.out === '/x');
+    po('unknown --kk did-you-mean --K', 2, ['--kk', '5'], errHas('did you mean --K?'));
+    po('--K twice', 2, ['--K', '21', '--K', '21'], errHas('--K given twice'));
+    po('--K needs a value', 2, ['--K'], errHas('--K needs a value'));
+    po('--K value is an option', 2, ['--K', '--smoke'], errHas('--K needs a value'));
+    po('--K empty', 2, ['--K', ''], errHas('--K needs a value'));
+    // signals (signalPlan, pure): forward the same signal, SIGKILL fallback after a finite grace, 130 / 143
+    c('signalPlan SIGINT -> forward SIGINT, exit 130', 0, () => ({ exit: 0 }), () => {
+        const p = signalPlan('SIGINT');
+        return p !== null && p.forward === 'SIGINT' && p.exit === 130 && p.fallback === 'SIGKILL' && Number.isFinite(p.graceMs) && p.graceMs > 0;
+    });
+    c('signalPlan SIGTERM -> forward SIGTERM, exit 143', 0, () => ({ exit: 0 }), () => {
+        const p = signalPlan('SIGTERM');
+        return p !== null && p.forward === 'SIGTERM' && p.exit === 143 && p.fallback === 'SIGKILL' && Number.isFinite(p.graceMs) && p.graceMs > 0;
+    });
+    c('signalPlan never forwards SIGKILL first', 0, () => ({ exit: 0 }), () => ['SIGINT', 'SIGTERM'].every((sg) => signalPlan(sg).forward !== 'SIGKILL'));
+    c('signalPlan other / bad -> null', 0, () => ({ exit: 0 }), () => [undefined, null, '', 'SIGHUP', 'SIGKILL', 'sigterm', 15].every((sg) => signalPlan(sg) === null));
     let pass = 0;
     const lines = [];
     for (const [name, want, fn, pred] of cases) {
@@ -608,22 +658,50 @@ function lev(a, b) {
     }
     return d[a.length][b.length];
 }
-const opt = Object.create(null);
-const argv = process.argv.slice(2);
-for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (!VALUE_OPTS.includes(a) && !FLAG_OPTS.includes(a)) {
-        let best = VALUE_OPTS[0];
-        for (const o of VALUE_OPTS.concat(FLAG_OPTS)) if (lev(a, o) < lev(a, best)) best = o;
-        die('unknown argument ' + JSON.stringify(a) + ' (did you mean ' + best + '?)');
+// canonical decimal integer: no sign, no leading zero, no exponent, no fraction ('0021', '+5', '5.0', '1e3' -> false)
+const CANON_INT = /^(?:0|[1-9][0-9]*)$/;
+const intIn = (s, lo, hi) => typeof s === 'string' && CANON_INT.test(s) && Number(s) >= lo && Number(s) <= hi;
+// option parser (pure): argv -> { err } or { opt, cfg: { K, comp, control, smoke, keep, out } }. Every given value is
+// validated before the --self-test exclusivity check, so a bad value is named even next to --self-test.
+function parseOpts(argv) {
+    const opt = Object.create(null);
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (!VALUE_OPTS.includes(a) && !FLAG_OPTS.includes(a)) {
+            let best = VALUE_OPTS[0];
+            for (const o of VALUE_OPTS.concat(FLAG_OPTS)) if (lev(String(a), o) < lev(String(a), best)) best = o;
+            return { err: 'unknown argument ' + JSON.stringify(a) + ' (did you mean ' + best + '?)' };
+        }
+        if (a in opt) return { err: a + ' given twice' };
+        if (FLAG_OPTS.includes(a)) { opt[a] = true; continue; }
+        const v = argv[i + 1];
+        if (v === undefined || v === '' || v.startsWith('--')) return { err: a + ' needs a value' };
+        opt[a] = v;
+        i++;
     }
-    if (a in opt) die(a + ' given twice');
-    if (FLAG_OPTS.includes(a)) { opt[a] = true; continue; }
-    const v = argv[i + 1];
-    if (v === undefined || v === '' || v.startsWith('--')) die(a + ' needs a value');
-    opt[a] = v;
-    i++;
+    if ('--K' in opt && !intIn(opt['--K'], 5, 1001)) return { err: '--K: want a canonical integer 5..1001 (no sign, no leading zero), got ' + JSON.stringify(opt['--K']) };
+    if ('--comp' in opt && !intIn(opt['--comp'], 1, 10)) return { err: '--comp: want a canonical integer 1..10 (no sign, no leading zero), got ' + JSON.stringify(opt['--comp']) };
+    if ('--control' in opt && !['box', 'aa', 'slow'].includes(opt['--control'])) return { err: '--control: box, aa or slow, got ' + JSON.stringify(opt['--control']) };
+    const SMOKE = opt['--smoke'] === true;
+    if (SMOKE && ('--K' in opt || '--comp' in opt)) return { err: '--smoke fixes K 5 x 1 compilation; drop --K / --comp' };
+    if (opt['--self-test'] === true && Object.keys(opt).length !== 1) return { err: '--self-test takes no other argument' };
+    const K = SMOKE ? '5' : (opt['--K'] ?? '21');
+    const comp = SMOKE ? '1' : (opt['--comp'] ?? '3');
+    // defence in depth: the defaults pass the same check
+    if (!intIn(K, 5, 1001) || !intIn(comp, 1, 10)) return { err: 'internal: default K / comp not canonical' };
+    return { opt, cfg: { K, comp: Number(comp), control: opt['--control'] ?? '', smoke: SMOKE, keep: opt['--keep'] === true, out: opt['--out'] } };
 }
+// signal plan (pure): SIGINT / SIGTERM -> forward the SAME signal to the running child, wait up to graceMs for its
+// exit, then SIGKILL it (fallback), exit 130 / 143. Any other signal -> null (no handler is installed for it).
+const SIGNAL_GRACE_MS = 10000;
+function signalPlan(sig) {
+    if (sig === 'SIGINT') return { forward: 'SIGINT', exit: 130, graceMs: SIGNAL_GRACE_MS, fallback: 'SIGKILL' };
+    if (sig === 'SIGTERM') return { forward: 'SIGTERM', exit: 143, graceMs: SIGNAL_GRACE_MS, fallback: 'SIGKILL' };
+    return null;
+}
+const PA = parseOpts(process.argv.slice(2));
+if (PA.err) die(PA.err);
+const opt = PA.opt;
 
 // self-test first, always, before any spawn
 const ST = selfTest();
@@ -639,18 +717,13 @@ if (!ST.ok) {
 }
 process.stdout.write('compare self-test: ' + ST.pass + '/' + ST.total + ' checks ok\n');
 
-const SMOKE = opt['--smoke'] === true;
-if (SMOKE && ('--K' in opt || '--comp' in opt)) die('--smoke fixes K 5 x 1 compilation; drop --K / --comp');
-const K = SMOKE ? '5' : (opt['--K'] ?? '21');
-if (!/^[0-9]+$/.test(K) || !(Number(K) >= 5 && Number(K) <= 1001)) die('--K: want an integer 5..1001');
-const COMP_S = SMOKE ? '1' : (opt['--comp'] ?? '3');
-if (!/^[0-9]+$/.test(COMP_S) || !(Number(COMP_S) >= 1 && Number(COMP_S) <= 10)) die('--comp: want an integer 1..10');
-const COMP = Number(COMP_S);
-const CONTROL = opt['--control'] ?? '';
-if (CONTROL !== '' && CONTROL !== 'box' && CONTROL !== 'aa' && CONTROL !== 'slow') die('--control: box, aa or slow');
-const KEEP = opt['--keep'] === true;
+const SMOKE = PA.cfg.smoke;
+const K = PA.cfg.K;
+const COMP = PA.cfg.comp;
+const CONTROL = PA.cfg.control;
+const KEEP = PA.cfg.keep;
 const T0 = new Date();
-const OUT = resolve(opt['--out'] ?? join(ROOT, '.handoff', 'bench-compare', 'compare-' + T0.toISOString().replace(/[:.]/g, '-')));
+const OUT = resolve(PA.cfg.out ?? join(ROOT, '.handoff', 'bench-compare', 'compare-' + T0.toISOString().replace(/[:.]/g, '-')));
 if (existsSync(OUT) && (!statSync(OUT).isDirectory() || readdirSync(OUT).length > 0)) die('--out must be a new or empty dir: ' + OUT);
 if (!isFile(PROBE)) die('probe missing: ' + PROBE);
 if (!isFile(GC)) die('gc lane missing: ' + GC);
@@ -699,14 +772,31 @@ const mnSha8 = MN_SHA256.slice(0, 8);
 const work = mkdtempSync(join(os.tmpdir(), 'lrb-compare-'));
 if (!KEEP) process.on('exit', () => { rmSync(work, { recursive: true, force: true }); });
 let child = null;
-const onSignal = (code) => () => { if (child) child.kill('SIGKILL'); process.exit(code); };
-process.on('SIGINT', onSignal(130));
-process.on('SIGTERM', onSignal(143));
+// SIGINT / SIGTERM: signalPlan (pure). Forward, then exit when the child exits (its 'exit' fires before the 'close'
+// that would resume the run loop, so no next probe / gc lane is spawned); SIGKILL after graceMs or on a second signal.
+let stopping = null;
+function onSignal(sig) {
+    const plan = signalPlan(sig);
+    if (stopping !== null) {
+        // a second signal while waiting: no more grace
+        if (stopping.ch) stopping.ch.kill(stopping.plan.fallback);
+        process.exit(stopping.plan.exit);
+    }
+    const ch = child;
+    stopping = { plan, ch };
+    if (!ch || ch.exitCode !== null || ch.signalCode !== null) process.exit(plan.exit);
+    ch.once('exit', () => process.exit(plan.exit));
+    setTimeout(() => { ch.kill(plan.fallback); setTimeout(() => process.exit(plan.exit), 2000); }, plan.graceMs);
+    ch.kill(plan.forward);
+}
+process.on('SIGINT', () => onSignal('SIGINT'));
+process.on('SIGTERM', () => onSignal('SIGTERM'));
 // async spawn: the event loop turns while a probe runs, so a signal is handled at once
 function runProbe(args) {
     return new Promise((res) => {
+        if (stopping !== null) return; // stopping: never spawn again (the signal path exits the process)
         let out = '', err = '', done = false;
-        const fin = (status, signal, error) => { if (done) return; done = true; clearTimeout(timer); child = null; res({ status, signal, stdout: out, stderr: err, error }); };
+        const fin = (status, signal, error) => { if (done) return; done = true; clearTimeout(timer); child = null; if (stopping === null) res({ status, signal, stdout: out, stderr: err, error }); };
         const ch = spawn(process.execPath, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
         child = ch;
         const timer = setTimeout(() => ch.kill('SIGKILL'), PROBE_TIMEOUT_MS);
